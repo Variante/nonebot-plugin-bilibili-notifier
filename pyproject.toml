@@ -6,7 +6,7 @@ authors = [
     {name = "Variante", email = "382086919@qq.com"},
 ]
 license = {text = "MIT"}
-dependencies = ["nonebot2>=2.0.0rc2", "nonebot-adapter-onebot>=2.1.5", "nonebot-plugin-apscheduler>=0.2.0"]
+dependencies = ["nonebot2>=2.0.0rc2", "nonebot-adapter-onebot>=2.1.5", "nonebot-plugin-apscheduler>=0.2.0", "bilibili-api-python>=16.2.0"]
 requires-python = ">=3.8"
 readme = "README.md"
 
