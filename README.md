@@ -1,7 +1,7 @@
 <div align="center">
-  <a href="https://v2.nonebot.dev/store"><img src="https://github.com/A-kirami/nonebot-plugin-bilibili-notifier/blob/resources/nbp_logo.png" width="180" height="180" alt="NoneBotPluginLogo"></a>
+  <a href="https://v2.nonebot.dev/store"><img src="https://github.com/A-kirami/nonebot-plugin-template/blob/resources/nbp_logo.png" width="180" height="180" alt="NoneBotPluginLogo"></a>
   <br>
-  <p><img src="https://github.com/A-kirami/nonebot-plugin-bilibili-notifier/blob/resources/NoneBotPlugin.svg" width="240" alt="NoneBotPluginText"></p>
+  <p><img src="https://github.com/A-kirami/nonebot-plugin-template/blob/resources/NoneBotPlugin.svg" width="240" alt="NoneBotPluginText"></p>
 </div>
 
 <div align="center">
@@ -83,9 +83,9 @@ B站UP的更新与开播通知机，默认每分钟爬取一次B站账号的动�
 
 | 配置项 | 必填 | 默认值 | 说明 |
 |:-----:|:----:|:----:|:----:|
-| bnotifier_cookies | 是 | 无 | B站cookies地址 |
-| bnotifier_push_updates | 否 | {} | 设置追踪更新的UP主的ID（点击主页后地址中显示的space.bilibili.com/\[这个号码\]）以及要推送的QQ群号，格式为{UP1: \[QQ群1， QQ群2, ...\], ...}。注意全部号码都应为字符串。|
-| bnotifier_push_lives | 是 | 无 | 同上bnotifier_push_updates但这次是直播通知 |
+| bnotifier_cookies | 是 | 无 | 上面导出的B站cookies的文件路径 |
+| bnotifier_push_updates | 否 | {} | 设置追踪更新的UP主的ID（点击主页后地址中显示的space.bilibili.com/\[这个号码\]）以及要推送的QQ群号，格式为{UP1: \[QQ群1， QQ群2, ...\], ...}。注意全部号码都应为字符串，一个例子：`{"823532": ["xxxxx", "yyyyy"]}`|
+| bnotifier_push_lives | 是 | 无 | 同bnotifier_push_updates但这个变量控制的是开播通知 |
 
 其它配置为开发调试时使用，正常使用无需调整。
 
