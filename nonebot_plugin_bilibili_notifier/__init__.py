@@ -1,6 +1,8 @@
 from nonebot import require
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
+require("nonebot_plugin_localstore")
+from nonebot_plugin_localstore import get_data_file
 
 from nonebot import  get_plugin_config, get_bot
 from nonebot.log import logger
@@ -46,6 +48,10 @@ def parse_dynamic(d: dict):
         # 发送了图文动态
         url = d['basic']['jump_url']
         text = '发布动态：' + d['modules']['module_dynamic']['major']['opus']['summary']['text']
+    elif dtype == 'DYNAMIC_TYPE_ARTICLE':
+        # 投稿专栏
+        url = d['basic']['jump_url']
+        text = info['pub_action'] + ': ' + d['modules']['module_dynamic']['major']['opus']['title']
     elif dtype == 'DYNAMIC_TYPE_FORWARD':
         # 转发
         url = '//t.bilibili.com/' + d['basic']['comment_id_str']
@@ -61,7 +67,6 @@ def parse_dynamic(d: dict):
         'text': text,
         'url': ('https:' + url) if len(url) else ''
     }
-
 
 # 加载cookies
 def fetch_cookies(file):
@@ -98,13 +103,27 @@ def convert_by_group(by_group: dict, normal: dict):
             else:
                 normal[ups] = [k]
                 
+# 查看是否黑名单
+def is_in_blacklist(mid: str, dtype: str):
+    if mid in config.bnotifier_push_type_blacklist:
+        if dtype in config.bnotifier_push_type_blacklist[mid]:
+            logger.info(f'屏蔽了{mid}的{dtype}，不推送')
+            return False
+    return True
+                
 
 config = get_plugin_config(Config)
 logger.debug(config)
 credential = get_credential(config.bnotifier_cookies)
-last_update = int(config.bnotifier_push_after)
-if last_update == 0:
+tmp_save = get_data_file('bilibili-notifier', 'last_update.json')
+try:
+    with open(tmp_save, 'r') as f:
+        last_update = json.load(f)['last_update']
+    logger.info(f'加载上次更新时间{last_update}')
+except:
+    logger.warning('未找到上次更新时间，使用当前时间')
     last_update = get_last_update()
+    
 last_live = None
 # 设置延时
 settings.timeout = config.bnotifier_api_timeout
@@ -113,6 +132,7 @@ convert_by_group(config.bnotifier_push_updates_by_group, config.bnotifier_push_u
 convert_by_group(config.bnotifier_push_lives_by_group, config.bnotifier_push_lives)
 logger.info(f'推送更新消息的用户：群：{config.bnotifier_push_updates}' )
 logger.info(f'推送直播消息的用户：群：{config.bnotifier_push_lives}' )
+logger.info(f'屏蔽的消息/群：{config.bnotifier_push_type_blacklist}' )
 
 @scheduler.scheduled_job('cron', second='0', misfire_grace_time=60) # = UTC+8 1445
 async def fetch_bilibili_updates():
@@ -129,14 +149,20 @@ async def fetch_bilibili_updates():
         res = parse_dynamic(d)
         logger.debug('处理结果')
         logger.debug(res)
-        
         if (key:=str(res['mid'])) in config.bnotifier_push_updates and res['time'] > last_update:
+            dtype = res['mid']
+            if is_in_blacklist(key, dtype):
+                continue
             msg = f"{res['name']} {res['text']}\n{res['url']}"
             for gid in config.bnotifier_push_updates[key]:
+                if is_in_blacklist(gid, dtype):
+                    continue
                 logger.info(f'将{key}的更新推送到{gid}\n{msg}')
                 await bot.send_group_msg(group_id=gid, message=msg)
     last_update = get_last_update()
-    
+    with open(tmp_save, 'w') as f:
+        json.dump({'last_update': last_update}, f)
+
     
 @scheduler.scheduled_job('cron', second='0', misfire_grace_time=60) # = UTC+8 1445
 async def fetch_bilibili_live_info():
