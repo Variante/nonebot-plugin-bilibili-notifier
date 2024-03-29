@@ -72,10 +72,12 @@ B站UP的更新与开播通知机，默认每分钟爬取一次B站账号的动�
 
 然后导出B站cookies，建议使用Firefox的Export cookie JSON file for Puppeteer插件直接生成JSON文件，如果想手动生成，请确保以下字段有效：
 ```
-'sessdata'
-'bili_jct'
-'buvid3'
-'dedeuserid'
+{
+  "sessdata": "",
+  "bili_jct": "",
+  "buvid3": "",
+  "dedeuserid": "" 
+}
 ```
 建议导出cookies时使用和常用的浏览器不同的浏览器（或匿名模式），不然B站会定时要求刷新你的cookies。
 
@@ -85,7 +87,7 @@ B站UP的更新与开播通知机，默认每分钟爬取一次B站账号的动�
 |:-----:|:----:|:----:|:----:|
 | bnotifier_cookies | 是 | 无 | 上面导出的B站cookies的文件路径 |
 | bnotifier_push_updates | 否 | {} | 设置追踪更新的UP主的ID（点击主页后地址中显示的space.bilibili.com/\[这个号码\]）以及要推送的QQ群号，格式为{UP1: \[QQ群1， QQ群2, ...\], ...}。注意全部号码都应为字符串，一个例子：`{"823532": ["xxxxx", "yyyyy"]}`|
-| bnotifier_push_lives | 是 | 无 | 同bnotifier_push_updates但这个变量控制的是开播通知 |
+| bnotifier_push_lives | 否 | 无 | 同bnotifier_push_updates但这个变量控制的是开播通知 |
 
 其它配置为开发调试时使用，正常使用无需调整。
 
