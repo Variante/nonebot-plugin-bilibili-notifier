@@ -89,6 +89,16 @@ def get_credential(file: str):
 def get_last_update():
     return int(time.time()) - config.bnotifier_timeshift
 
+# 把{qq: [mid]}的形式转化为{mid: [qq]}
+def convert_by_group(by_group: dict, normal: dict):
+    for k, v in by_group.items():
+        for ups in v:
+            if ups in normal:
+                normal[ups].append(k)
+            else:
+                normal[ups] = [k]
+                
+
 config = get_plugin_config(Config)
 logger.debug(config)
 credential = get_credential(config.bnotifier_cookies)
@@ -98,6 +108,11 @@ if last_update == 0:
 last_live = None
 # 设置延时
 settings.timeout = config.bnotifier_api_timeout
+# 将by group的配置转化为标准配置
+convert_by_group(config.bnotifier_push_updates_by_group, config.bnotifier_push_updates)
+convert_by_group(config.bnotifier_push_lives_by_group, config.bnotifier_push_lives)
+logger.info(f'推送更新消息的用户：群：{config.bnotifier_push_updates}' )
+logger.info(f'推送直播消息的用户：群：{config.bnotifier_push_lives}' )
 
 @scheduler.scheduled_job('cron', second='0', misfire_grace_time=60) # = UTC+8 1445
 async def fetch_bilibili_updates():
