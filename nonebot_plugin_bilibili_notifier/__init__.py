@@ -3,12 +3,12 @@ require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 require("nonebot_plugin_localstore")
 from nonebot_plugin_localstore import get_data_file
-
 from nonebot import  get_plugin_config, get_bot
 from nonebot.log import logger
 from .config import Config
 import json
 import time
+import datetime
 
 from bilibili_api import Credential
 from bilibili_api.dynamic import get_live_users
@@ -119,7 +119,8 @@ tmp_save = get_data_file('bilibili-notifier', 'last_update.json')
 try:
     with open(tmp_save, 'r') as f:
         last_update = json.load(f)['last_update']
-    logger.info(f'加载上次更新时间{last_update}')
+    dt = datetime.datetime.fromtimestamp(last_update)
+    logger.info(f'加载上次更新时间{dt}')
 except:
     logger.warning('未找到上次更新时间，使用当前时间')
     last_update = get_last_update()
