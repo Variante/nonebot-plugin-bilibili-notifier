@@ -2,7 +2,7 @@ from nonebot import require
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 require("nonebot_plugin_localstore")
-from nonebot_plugin_localstore import get_data_file
+from nonebot_plugin_localstore import get_cache_file
 from nonebot import  get_plugin_config, get_bot
 from nonebot.log import logger
 from .config import Config
@@ -108,19 +108,19 @@ def is_in_blacklist(mid: str, dtype: str):
     if mid in config.bnotifier_push_type_blacklist:
         if dtype in config.bnotifier_push_type_blacklist[mid]:
             logger.info(f'屏蔽了{mid}的{dtype}，不推送')
-            return False
-    return True
+            return True
+    return False
                 
 
 config = get_plugin_config(Config)
 logger.debug(config)
 credential = get_credential(config.bnotifier_cookies)
-tmp_save = get_data_file('bilibili-notifier', 'last_update.json')
+tmp_save = get_cache_file('bilibili-notifier', 'last_update.json')
 try:
     with open(tmp_save, 'r') as f:
         last_update = json.load(f)['last_update']
     dt = datetime.datetime.fromtimestamp(last_update)
-    logger.info(f'加载上次更新时间{dt}')
+    logger.info(f'加载上次更新时间{dt}({last_update})')
 except:
     logger.warning('未找到上次更新时间，使用当前时间')
     last_update = get_last_update()
@@ -144,12 +144,14 @@ async def fetch_bilibili_updates():
     dyna = await get_dynamic_page_info(credential)
     logger.debug(f'更新到{len(dyna)}条动态')
     bot = get_bot()
+    dyna_names = []
     for i, d in enumerate(dyna):
         logger.debug(f'处理第{i + 1}条动态')
-        logger.debug(d)
+        # logger.debug(d)
         res = parse_dynamic(d)
-        logger.debug('处理结果')
         logger.debug(res)
+        dyna_names.append(res['name'])
+        logger.debug(f'Time: {datetime.datetime.fromtimestamp(res["time"])}({res["time"]}) vs {last_update}')
         if (key:=str(res['mid'])) in config.bnotifier_push_updates and res['time'] > last_update:
             dtype = res['mid']
             if is_in_blacklist(key, dtype):
@@ -163,6 +165,7 @@ async def fetch_bilibili_updates():
     last_update = get_last_update()
     with open(tmp_save, 'w') as f:
         json.dump({'last_update': last_update}, f)
+    logger.debug(f'成功刷新{len(dyna)}条动态：' + ', '.join(dyna_names))
 
     
 @scheduler.scheduled_job('cron', second='0', misfire_grace_time=60) # = UTC+8 1445
@@ -176,11 +179,13 @@ async def fetch_bilibili_live_info():
         last_live = set()
         return
     on_live = []
+    on_live_names = []
     bot = get_bot()
     for i, d in enumerate(live['items']):
-        logger.debug(f'处理第{i + 1}个直播用户')
+        # logger.debug(f'处理第{i + 1}个直播用户')
         key = str(d['uid'])
         on_live.append(key)
+        on_live_names.append(d['uname'])
         if key in config.bnotifier_push_lives and last_live is not None:
             # 已经在直播就不通知了
             if key in last_live:
@@ -190,4 +195,4 @@ async def fetch_bilibili_live_info():
                 logger.info(f'将{key}的直播消息推送到{gid}')
                 await bot.send_group_msg(group_id=gid, message=msg)
     last_live = set(on_live)
-    
+    logger.debug(f'正在直播的有：{", ".join(on_live_names)}')
