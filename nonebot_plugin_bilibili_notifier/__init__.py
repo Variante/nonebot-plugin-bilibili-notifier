@@ -90,9 +90,6 @@ def get_credential(file: str):
     # 生成一个 Credential 对象
     return Credential(**cookies)
 
-# 获取当前时刻（只发布当前时刻之后更新的动态）
-def get_last_update():
-    return int(time.time()) - config.bnotifier_timeshift
 
 # 把{qq: [mid]}的形式转化为{mid: [qq]}
 def convert_by_group(by_group: dict, normal: dict):
@@ -123,7 +120,7 @@ try:
     logger.info(f'加载上次更新时间{dt}({last_update})')
 except:
     logger.warning('未找到上次更新时间，使用当前时间')
-    last_update = get_last_update()
+    last_update = int(time.time())
     
 last_live = None
 # 设置延时
@@ -145,6 +142,7 @@ async def fetch_bilibili_updates():
     logger.debug(f'更新到{len(dyna)}条动态')
     bot = get_bot()
     dyna_names = []
+    dyna_times = []
     for i, d in enumerate(dyna):
         logger.debug(f'处理第{i + 1}条动态')
         # logger.debug(d)
@@ -162,9 +160,12 @@ async def fetch_bilibili_updates():
                     continue
                 logger.info(f'将{key}的更新推送到{gid}\n{msg}')
                 await bot.send_group_msg(group_id=gid, message=msg)
-    last_update = get_last_update()
-    with open(tmp_save, 'w') as f:
-        json.dump({'last_update': last_update}, f)
+        dyna_times.append(res["time"])
+    if (t:= max(dyna_times)) != last_update: # 使用最后一条动态的时间
+        last_update = t
+        with open(tmp_save, 'w') as f:
+            json.dump({'last_update': t}, f)
+        logger.debug(f'刷新动态更新时间为{t}({last_update})')
     logger.debug(f'成功刷新{len(dyna)}条动态：' + ', '.join(dyna_names))
 
     
@@ -196,3 +197,4 @@ async def fetch_bilibili_live_info():
                 await bot.send_group_msg(group_id=gid, message=msg)
     last_live = set(on_live)
     logger.debug(f'正在直播的有：{", ".join(on_live_names)}')
+    

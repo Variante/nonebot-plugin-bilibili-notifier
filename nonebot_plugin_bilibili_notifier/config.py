@@ -36,9 +36,6 @@ class Config(BaseModel):
     """
     bnotifier_api_timeout: float = 20
     """
-    dev用，API访问超时设置，不用管
+    dev用，API访问超时设置，如果网络不稳定可以酌情加大
     """
-    bnotifier_timeshift: int = 45
-    """
-    dev用，允许稍微靠前一点时间的动态，不用管
-    """
+    
