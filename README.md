@@ -93,6 +93,7 @@ B站UP的更新与开播通知机，默认每分钟爬取一次B站账号的动�
 | bnotifier_push_lives | 否 | {} | 同bnotifier_push_updates但这个变量控制的是开播通知 |
 | bnotifier_push_lives_by_group | 否 | {} | 格式同bnotifier_push_updates_by_group但这个变量控制的是开播通知 |
 | bnotifier_push_type_blacklist | 否 | {} | 屏蔽推送某种动态信息，格式：`{QQ群号或BID: ['DYNAMIC_TYPE_AV', 'DYNAMIC_TYPE_FORWARD', ...]}`这样会屏蔽特定群/特定up的某种动态信息。关于动态种类请参考[这个连接](https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/dynamic/dynamic_enum.md) |
+| bnotifier_msg_truncate | 否 | 256 | 将一条非常长的动态截短到设定的长度 |
 
 其它配置为开发调试时使用，正常使用无需调整。
 
