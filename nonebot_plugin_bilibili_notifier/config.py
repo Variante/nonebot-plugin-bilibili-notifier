@@ -38,4 +38,7 @@ class Config(BaseModel):
     """
     dev用，API访问超时设置，如果网络不稳定可以酌情加大
     """
-    
+    bnotifier_msg_truncate: int = 256
+    """
+    截断一条超长的动态
+    """

@@ -132,7 +132,17 @@ logger.info(f'推送更新消息的用户：群：{config.bnotifier_push_updates
 logger.info(f'推送直播消息的用户：群：{config.bnotifier_push_lives}' )
 logger.info(f'屏蔽的消息/群：{config.bnotifier_push_type_blacklist}' )
 
-@scheduler.scheduled_job('cron', second='0', misfire_grace_time=60) # = UTC+8 1445
+def clean_url(u: str) -> str:
+    # 叔叔现在开始往链接里塞奇怪的东西了
+    return u.split('?')[0]
+
+def shorten(u: str) -> str:
+    l = config.bnotifier_msg_truncate
+    if len(u) > l:
+        return u[:l] + '\n...点击链接查看全文'
+    return u
+
+@scheduler.scheduled_job('cron', second='0', misfire_grace_time=20)
 async def fetch_bilibili_updates():
     global last_update
     if len(config.bnotifier_push_updates) == 0:
@@ -154,7 +164,7 @@ async def fetch_bilibili_updates():
             dtype = res['mid']
             if is_in_blacklist(key, dtype):
                 continue
-            msg = f"{res['name']} {res['text']}\n{res['url']}"
+            msg = f"{res['name']} {shorten(res['text'])}\n{clean_url(res['url'])}"
             for gid in config.bnotifier_push_updates[key]:
                 if is_in_blacklist(gid, dtype):
                     continue
@@ -169,15 +179,15 @@ async def fetch_bilibili_updates():
     logger.debug(f'成功刷新{len(dyna)}条动态：' + ', '.join(dyna_names))
 
     
-@scheduler.scheduled_job('cron', second='0', misfire_grace_time=60) # = UTC+8 1445
+@scheduler.scheduled_job('cron', second='0', misfire_grace_time=20)
 async def fetch_bilibili_live_info():
     global last_live
     if len(config.bnotifier_push_lives) == 0:
         return
     logger.debug('获取直播状态')
     live = await get_live_users(credential=credential, size=50)
-    if live['count'] == 0:
-        last_live = set()
+    if live['count'] == 0 or 'items' not in live:
+        # 应对有时奇怪的网络错误
         return
     on_live = []
     on_live_names = []
@@ -191,10 +201,14 @@ async def fetch_bilibili_live_info():
             # 已经在直播就不通知了
             if key in last_live:
                 continue
-            msg = f"{d['uname']}开始直播了：{d['title']}\n地址：{d['link']}"
+            # 现在title全都是空了，不知道为什么
+            msg = f"{d['uname']}开始直播了：{d['title']}\n地址：{clean_url(d['link'])}"
             for gid in config.bnotifier_push_lives[key]:
                 logger.info(f'将{key}的直播消息推送到{gid}')
                 await bot.send_group_msg(group_id=gid, message=msg)
     last_live = set(on_live)
-    logger.debug(f'正在直播的有：{", ".join(on_live_names)}')
+    logger.debug(f'{live["count"]}用户正在直播：{", ".join(on_live_names)}')
+    # if live['count'] >= 10:
+    #     with open('live.log', '+a') as f:
+    #        f.write(f'{datetime.datetime.now()} | {live["count"]}用户正在直播：{", ".join(on_live_names)}\n')
     
