@@ -3,7 +3,9 @@ require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 require("nonebot_plugin_localstore")
 from nonebot_plugin_localstore import get_cache_file
-from nonebot import  get_plugin_config, get_bot
+require("nonebot_plugin_saa")
+from nonebot_plugin_saa import TargetQQGroup, MessageFactory, enable_auto_select_bot
+from nonebot import  get_plugin_config
 from nonebot.log import logger
 from .config import Config
 import json
@@ -17,6 +19,7 @@ from bilibili_api.utils.network import Api
 from bilibili_api import settings
 
 API = get_api("dynamic")
+enable_auto_select_bot()
 
 async def get_dynamic_page_info(
     credential: Credential,
@@ -150,7 +153,6 @@ async def fetch_bilibili_updates():
     logger.debug('获取B站动态更新')
     dyna = await get_dynamic_page_info(credential)
     logger.debug(f'更新到{len(dyna)}条动态')
-    bot = get_bot()
     dyna_names = []
     dyna_times = []
     for i, d in enumerate(dyna):
@@ -169,7 +171,7 @@ async def fetch_bilibili_updates():
                 if is_in_blacklist(gid, dtype):
                     continue
                 logger.info(f'将{key}的更新推送到{gid}\n{msg}')
-                await bot.send_group_msg(group_id=gid, message=msg)
+                await MessageFactory(msg).send_to(TargetQQGroup(group_id=int(gid)))
         dyna_times.append(res["time"])
     if (t:= max(dyna_times)) != last_update: # 使用最后一条动态的时间
         last_update = t
@@ -191,7 +193,6 @@ async def fetch_bilibili_live_info():
         return
     on_live = []
     on_live_names = []
-    bot = get_bot()
     for i, d in enumerate(live['items']):
         # logger.debug(f'处理第{i + 1}个直播用户')
         key = str(d['uid'])
@@ -205,7 +206,7 @@ async def fetch_bilibili_live_info():
             msg = f"{d['uname']}开始直播了：{d['title']}\n地址：{clean_url(d['link'])}"
             for gid in config.bnotifier_push_lives[key]:
                 logger.info(f'将{key}的直播消息推送到{gid}')
-                await bot.send_group_msg(group_id=gid, message=msg)
+                await MessageFactory(msg).send_to(TargetQQGroup(group_id=int(gid)))
     last_live = set(on_live)
     logger.debug(f'{live["count"]}用户正在直播：{", ".join(on_live_names)}')
     # if live['count'] >= 10:
