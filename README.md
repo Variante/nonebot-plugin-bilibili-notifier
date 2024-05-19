@@ -25,7 +25,7 @@ _✨ B站UP的更新与开播通知机 ✨_
 
 B站UP的更新与开播通知机，默认每分钟爬取一次B站账号的动态与直播列表，将设置好的特定UP的更新或开播信息推送到QQ群里。
 
-目前仅测试适配了Onebot v11协议。
+理论上适配[SAA](https://github.com/MountainDash/nonebot-plugin-send-anything-anywhere)支持的各种协议，实测了Onebot v11协议成功。
 
 ## 💿 安装
 
