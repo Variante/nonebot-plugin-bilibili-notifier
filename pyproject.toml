@@ -1,7 +1,7 @@
 [project]
 name = "nonebot-plugin-bilibili-notifier"
-version = "0.1"
-description = "NoneBot2 plugin for Bilibili update and live notifications"
+version = "0.2"
+description = "NoneBot2 plugin for pushing update and live notifications from Bibibili."
 authors = [
     {name = "Variante", email = "382086919@qq.com"},
 ]

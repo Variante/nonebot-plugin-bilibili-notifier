@@ -34,11 +34,27 @@ class Config(BaseModel):
         UP: ['DYNAMIC_TYPE_FORWARD'] 不推送这个up的转发信息
     }
     """
+    bnotifier_like: list = []
+    """
+    刷到某人的动态的时候自动点赞，可mid或者昵称
+    """
     bnotifier_api_timeout: float = 20
     """
     dev用，API访问超时设置，如果网络不稳定可以酌情加大
     """
-    bnotifier_msg_truncate: int = 256
+    bnotifier_msg_truncate: int = 150
     """
     截断一条超长的动态
+    """
+    bnotifier_debug_user: list = []
+    """
+    所有原始消息都发给这个用户一份
+    """
+    bnotifier_dynamic_update_interval: int = 60
+    """
+    动态获取间隔，单位秒，默认60秒一次
+    """
+    bnotifier_live_update_interval: int = 29
+    """
+    直播获取间隔，单位秒，默认29秒一次
     """
