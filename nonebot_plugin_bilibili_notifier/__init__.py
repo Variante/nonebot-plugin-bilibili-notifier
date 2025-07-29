@@ -284,7 +284,7 @@ async def fetch_bilibili_updates():
             如果需要限制长度，使用short_msg和original_short_msg，现在默认为全文本
             """
             short_msg, full_msg = prepare_message_list(parsed_dynamic)
-            messages_to_send = MessageFactory(full_msg) # 聊天记录中的第一条消息
+            messages_to_send = [MessageFactory(full_msg)] # 聊天记录中的第一条消息
             
             # Handle forwarded dynamics
             if parsed_dynamic['orig'] is not None:
