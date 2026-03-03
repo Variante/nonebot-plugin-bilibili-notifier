@@ -50,11 +50,11 @@ class Config(BaseModel):
     """
     所有原始消息都发给这个用户一份
     """
-    bnotifier_dynamic_update_interval: int = 60
+    bnotifier_dynamic_update_interval: int = 120
     """
     动态获取间隔，单位秒，默认60秒一次
     """
-    bnotifier_live_update_interval: int = 29
+    bnotifier_live_update_interval: int = 60
     """
     直播获取间隔，单位秒，默认29秒一次
     """

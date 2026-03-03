@@ -5,7 +5,7 @@ require("nonebot_plugin_localstore")
 from nonebot_plugin_localstore import get_cache_file
 require("nonebot_plugin_saa")
 from nonebot_plugin_saa import TargetQQGroup, TargetQQPrivate, MessageFactory, enable_auto_select_bot, Image, Text, AggregatedMessageFactory
-from nonebot import  get_plugin_config, get_bot
+from nonebot import  get_plugin_config
 from nonebot.log import logger
 from .config import Config
 import json
@@ -18,7 +18,7 @@ from bilibili_api.dynamic import get_live_users, Dynamic
 from bilibili_api.live import LiveRoom
 from bilibili_api.utils.utils import get_api
 from bilibili_api.utils.network import Api
-from bilibili_api import settings
+from bilibili_api import request_settings
 
 BILIBILI_API = get_api("dynamic")
 enable_auto_select_bot()
@@ -50,8 +50,10 @@ def parse_rich_text(rich_text_nodes: dict):
                 emoji_url = emoji_data.get('icon_url', None)
             if emoji_url is not None:
                 message_segments.append(Image(emoji_url))
-        elif node['type'] in ['RICH_TEXT_NODE_TYPE_TEXT', 'RICH_TEXT_NODE_TYPE_AT']:
+        elif node['type'] in ['RICH_TEXT_NODE_TYPE_TEXT', 'RICH_TEXT_NODE_TYPE_AT', 'RICH_TEXT_NODE_TYPE_TOPIC', 'RICH_TEXT_NODE_TYPE_LOTTERY']:
             message_segments.append(Text(node['text']))
+        elif node['type'] == 'RICH_TEXT_NODE_TYPE_WEB':
+            message_segments.append(Text(node['orig_text']))
         else:
             continue
     return message_segments
@@ -174,12 +176,14 @@ credential = get_credential(config.bnotifier_cookies)
 bnotifier_like = set(config.bnotifier_like)
 
 last_update_file = get_cache_file('bilibili-notifier', 'last_update.json')
+dyna_blacklist = set()
 
 try:
     with open(last_update_file, 'r') as file:
-        last_update_timestamp = json.load(file)['last_update']
-    last_update_datetime = datetime.datetime.fromtimestamp(last_update_timestamp)
-    logger.info(f'加载上次更新时间{last_update_datetime}({last_update_timestamp})')
+        json_data = json.load(file)
+        last_update_timestamp = json_data.get('last_update', int(time.time()))
+        dyna_blacklist = set(json_data.get('dyna_blacklist', []))
+    logger.info(f'加载上次更新时间：{datetime.datetime.fromtimestamp(last_update_timestamp).strftime("%Y-%m-%d %H:%M:%S")} （{last_update_timestamp})')
 except:
     logger.warning('未找到上次更新时间，使用当前时间')
     last_update_timestamp = int(time.time())
@@ -187,7 +191,7 @@ except:
 last_live_users = None
 
 # Set API timeout
-settings.timeout = config.bnotifier_api_timeout
+request_settings.timeout = config.bnotifier_api_timeout
 
 # Convert group-based config to standard config
 convert_by_group(config.bnotifier_push_updates_by_group, config.bnotifier_push_updates)
@@ -247,6 +251,9 @@ def prepare_message_list(dynamic_result: dict):
 @scheduler.scheduled_job('interval', seconds=config.bnotifier_dynamic_update_interval)
 async def fetch_bilibili_updates():
     global last_update_timestamp
+    global dyna_blacklist
+    
+    next_dyna_blacklist = set()
     
     if len(config.bnotifier_push_updates) == 0:
         return
@@ -254,66 +261,85 @@ async def fetch_bilibili_updates():
     dynamic_list = await get_dynamic_page_info(credential)
     dynamic_timestamps = []
     
-    for index, dynamic_item in enumerate(dynamic_list):
-        logger.debug(f'处理第{index + 1}条动态')
-        
-        parsed_dynamic = parse_dynamic(dynamic_item)
-        if parsed_dynamic is None:
-            continue
-        
-        up_mid = str(parsed_dynamic['mid'])
-        up_name = parsed_dynamic['name']
-        
-        # Handle auto-like feature
-        if up_mid in bnotifier_like or up_name in bnotifier_like:
-            dynamic_id = int(dynamic_item['id_str'])
-            if dynamic_item['modules']['module_stat']['like']['status']:
-                # already liked
-                logger.debug(f'已经给 {up_name} 的 {dynamic_id} 点赞了')
-            else:
-                await Dynamic(dynamic_id, credential=credential).set_like(True)
-                logger.info(f'给 {up_name} 的 {dynamic_id} 点赞了')
-                
-        # Handle push feature
-        if up_mid in config.bnotifier_push_updates and parsed_dynamic['time'] > last_update_timestamp:
-            dynamic_type = parsed_dynamic['type']
-            if is_in_blacklist(up_mid, dynamic_type):
+    for dynamic_item in dynamic_list:
+        try:
+            parsed_dynamic = parse_dynamic(dynamic_item)
+            if parsed_dynamic is None:
                 continue
             
-            """
-            如果需要限制长度，使用short_msg和original_short_msg，现在默认为全文本
-            """
-            short_msg, full_msg = prepare_message_list(parsed_dynamic)
-            messages_to_send = [MessageFactory(full_msg)] # 聊天记录中的第一条消息
+            up_mid = str(parsed_dynamic['mid'])
+            up_name = parsed_dynamic['name']
             
-            # Handle forwarded dynamics
-            if parsed_dynamic['orig'] is not None:
-                _, original_full_msg = prepare_message_list(parsed_dynamic['orig'])
-                messages_to_send.append(MessageFactory('被转发的动态:')) # 聊天记录中的第二条消息，如果有转发消息的话
-                messages_to_send.append(MessageFactory(original_full_msg))
-            
-            # 聊天记录中的最后一条消息，发送的动态的链接
-            messages_to_send.append(MessageFactory('动态链接：' + clean_url(parsed_dynamic['url'])))
-            
-            # Send to groups
-            for group_id in config.bnotifier_push_updates[up_mid]:
-                if is_in_blacklist(group_id, dynamic_type):
+            # Handle auto-like feature
+            if up_mid in bnotifier_like or up_name in bnotifier_like:
+                dynamic_id = int(dynamic_item['id_str'])
+                if dynamic_id in dyna_blacklist:
+                    next_dyna_blacklist.add(dynamic_id)
                     continue
-                logger.info(f'将 {up_name} 的更新消息推送到群{group_id}')
-                await AggregatedMessageFactory(messages_to_send).send_to(TargetQQGroup(group_id=int(group_id)))
+                if not dynamic_item['modules']['module_stat']['like']['status']:
+                    res = await Dynamic(dynamic_id, credential=credential).set_like(True)
+                    # 没有权限的点赞会返回空字典
+                    if res.get('code', 1) == 0:
+                        logger.info(f'给 {up_name} 的 {dynamic_id} 点赞了')
+                    else:
+                        logger.warning(f'给 {up_name} 的 {dynamic_id} 点赞失败')
+                        next_dyna_blacklist.add(dynamic_id)
+                    
+            # Handle push feature
+            if up_mid in config.bnotifier_push_updates and parsed_dynamic['time'] > last_update_timestamp:
+                dynamic_type = parsed_dynamic['type']
+                if is_in_blacklist(up_mid, dynamic_type):
+                    continue
                 
-            # Send to debug users
-            for debug_user_id in config.bnotifier_debug_user:
-                logger.info(f'将 {up_name} 的更新消息推送到用户{debug_user_id}')
-                await AggregatedMessageFactory(messages_to_send).send_to(TargetQQPrivate(user_id=int(debug_user_id)))
-             
-        dynamic_timestamps.append(parsed_dynamic["time"])
+                """
+                如果需要限制长度，使用short_msg和original_short_msg，现在默认为全文本
+                """
+                short_msg, full_msg = prepare_message_list(parsed_dynamic)
+                messages_to_send = [MessageFactory(full_msg)] # 聊天记录中的第一条消息
+                
+                # Handle forwarded dynamics
+                if parsed_dynamic['orig'] is not None:
+                    if '中奖' in  parsed_dynamic['text']:
+                        logger.info(f'跳过 {up_name} 的中奖动态: ' + parsed_dynamic['text'])
+                        continue
+                    _, original_full_msg = prepare_message_list(parsed_dynamic['orig'])
+                    messages_to_send.append(MessageFactory('被转发的动态:')) # 聊天记录中的第二条消息，如果有转发消息的话
+                    messages_to_send.append(MessageFactory(original_full_msg))
+                
+                # 聊天记录中的最后一条消息，发送的动态的链接
+                messages_to_send.append(MessageFactory('动态链接：' + clean_url(parsed_dynamic['url'])))
+                messages_to_send = AggregatedMessageFactory(messages_to_send)
+                
+                # Send to debug users
+                for debug_user_id in config.bnotifier_debug_user:
+                    logger.info(f'将 {up_name} 的更新消息推送到用户{debug_user_id}')
+                    await messages_to_send.send_to(TargetQQPrivate(user_id=int(debug_user_id)))
+                    # logger.success(f'将 {up_name} 的更新消息推送到用户{debug_user_id}')
+                
+                # Send to groups
+                for group_id in config.bnotifier_push_updates[up_mid]:
+                    # The user is tracked by debug purpose
+                    if len(group_id) == 0:
+                        continue
+                    if is_in_blacklist(group_id, dynamic_type):
+                        continue
+                    logger.info(f'将 {up_name} 的更新消息推送到群{group_id}')
+                    await messages_to_send.send_to(TargetQQGroup(group_id=int(group_id)))
+                    # logger.success(f'将 {up_name} 的更新消息推送到群{group_id}')
+                    
+            dynamic_timestamps.append(parsed_dynamic["time"])
         
+        except Exception as e:
+            logger.warning(f'获取推送动态失败：{e}')
+            
+    # Update dynamic blacklist
+    dyna_blacklist = next_dyna_blacklist
+    
     # Update last update timestamp
     if (latest_timestamp := max(dynamic_timestamps)) > last_update_timestamp:
         last_update_timestamp = latest_timestamp
         with open(last_update_file, 'w') as file:
-            json.dump({'last_update': latest_timestamp}, file)
+            json.dump({'last_update': latest_timestamp, 'dyna_blacklist': list(next_dyna_blacklist)}, file)
         logger.debug(f'刷新动态更新时间为{latest_timestamp}({last_update_timestamp})')
 
 
@@ -335,35 +361,43 @@ async def fetch_bilibili_live_info():
     currently_live_usernames = []
     
     for index, live_user in enumerate(live_info['items']):
-        up_mid = str(live_user['uid'])
-        up_name = live_user['uname']
-        
-        currently_live_users.append(up_mid)
-        currently_live_usernames.append(up_name)
-        
-        if up_mid in config.bnotifier_push_lives and last_live_users is not None:
-            # Don't notify if already live
-            if up_mid in last_live_users:
-                continue
-                
-            # Title is now empty for some reason
-            room_url = clean_url(live_user['link'])
-            live_notification_msg = [Text(f"{up_name} 开始直播了：{room_url}")]
-            try:
-                room_cls = LiveRoom(int(re.match(r'https://live.bilibili.com/(\d+)', room_url).group(1)), credential=credential)
-                room_info = await room_cls.get_room_info()
-                live_notification_msg.append(Text('\n标题：' + room_info['room_info']['title']))
-                live_notification_msg.append(Image(room_info['room_info']['cover']))
-            except Exception as e:
-                pass
-            for group_id in config.bnotifier_push_lives[up_mid]:
-                logger.info(f'将 {up_name} 的开播消息推送到群{group_id}')
-                await MessageFactory(live_notification_msg).send_to(TargetQQGroup(group_id=int(group_id)))
+        try:
+            up_mid = str(live_user['uid'])
+            up_name = live_user['uname']
             
-            for debug_user_id in config.bnotifier_debug_user:
-                logger.debug(f'将 {up_name} 的开播消息推送到用户{debug_user_id}')
-                debug_target = TargetQQPrivate(user_id=int(debug_user_id))
-                await MessageFactory(live_notification_msg).send_to(debug_target)
+            currently_live_users.append(up_mid)
+            currently_live_usernames.append(up_name)
+            
+            if up_mid in config.bnotifier_push_lives and last_live_users is not None:
+                # Don't notify if already live
+                if up_mid in last_live_users:
+                    continue
+                    
+                # Title is now empty for some reason
+                room_url = clean_url(live_user['link'])
+                live_notification_msg = [Text(f"{up_name} 开始直播了：{room_url}")]
+                try:
+                    room_cls = LiveRoom(int(re.match(r'https://live.bilibili.com/(\d+)', room_url).group(1)), credential=credential)
+                    room_info = await room_cls.get_room_info()
+                    live_notification_msg.append(Text('\n标题：' + room_info['room_info']['title']))
+                    live_notification_msg.append(Image(room_info['room_info']['cover']))
+                except Exception as e:
+                    pass
+                
+                for debug_user_id in config.bnotifier_debug_user:
+                    logger.debug(f'将 {up_name} 的开播消息推送到用户{debug_user_id}')
+                    debug_target = TargetQQPrivate(user_id=int(debug_user_id))
+                    await MessageFactory(live_notification_msg).send_to(debug_target)
+                    
+                for group_id in config.bnotifier_push_lives[up_mid]:
+                    # The user is tracked by debug purpose
+                    if len(group_id) == 0:
+                        continue
+                    logger.info(f'将 {up_name} 的开播消息推送到群{group_id}')
+                    await MessageFactory(live_notification_msg).send_to(TargetQQGroup(group_id=int(group_id)))
+
+        except Exception as e:
+            logger.error(f'获取推送直播信息失败：{e}')
                 
     last_live_users = set(currently_live_users)
     logger.debug(f'{live_info["count"]}个用户正在直播：{", ".join(currently_live_usernames)}')
