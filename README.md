@@ -117,6 +117,10 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 - 示例：`/dd 1175425797536612360`
 - 权限：发送者必须在 `bnotifier_debug_user` 列表中
 - 行为：按动态ID拉取并解析动态，然后将消息推送给发送者
+- 命令：`/dr` 或 `/dr <unix时间戳>`
+- 示例：`/dr`、`/dr 1732012345`
+- 权限：发送者必须在 `bnotifier_debug_user` 列表中
+- 行为：重置 `last_update_timestamp`（不带参数时重置为当前时间）
 
 ## 🍪 cookies 文件格式
 

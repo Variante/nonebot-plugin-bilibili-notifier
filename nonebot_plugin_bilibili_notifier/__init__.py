@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Optional
 
 from nonebot import get_plugin_config, on_command, require
@@ -49,6 +50,15 @@ def _extract_dynamic_id(arg_text: str) -> Optional[int]:
     return None
 
 
+def _extract_timestamp(arg_text: str) -> Optional[int]:
+    text = arg_text.strip()
+    if not text:
+        return None
+    if not re.fullmatch(r"\d+", text):
+        return None
+    return int(text)
+
+
 debug_dynamic = on_command("dd", rule=Rule(is_sender_debug_user), block=True)
 
 
@@ -61,3 +71,25 @@ async def handle_debug_dynamic(event: Event, args: Message = CommandArg()) -> No
     ok, reason = await service.push_dynamic_to_user(dynamic_id, event.get_user_id())
     if not ok:
         await debug_dynamic.finish(reason)
+
+
+debug_reset_update = on_command("dr", rule=Rule(is_sender_debug_user), block=True)
+
+
+@debug_reset_update.handle()
+async def handle_debug_reset_update(args: Message = CommandArg()) -> None:
+    raw_arg = args.extract_plain_text().strip()
+    if raw_arg:
+        target_timestamp = _extract_timestamp(raw_arg)
+        if target_timestamp is None:
+            await debug_reset_update.finish("用法: /dr 或 /dr <unix时间戳>")
+    else:
+        target_timestamp = None
+
+    old_timestamp, new_timestamp = service.reset_last_update_timestamp(target_timestamp)
+
+    old_text = datetime.fromtimestamp(old_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    new_text = datetime.fromtimestamp(new_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    await debug_reset_update.finish(
+        f"已重置 last_update_timestamp\n旧值: {old_timestamp} ({old_text})\n新值: {new_timestamp} ({new_text})"
+    )

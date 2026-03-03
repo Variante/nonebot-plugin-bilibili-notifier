@@ -601,3 +601,20 @@ class BilibiliNotifierService:
 
         logger.info(f"按ID推送动态成功（{dynamic_id} -> {qq_user_id}）")
         return True, "ok"
+
+    def reset_last_update_timestamp(self, timestamp: Optional[int] = None) -> Tuple[int, int]:
+        old_timestamp = self.last_update_timestamp
+
+        if timestamp is None:
+            new_timestamp = int(time.time())
+        else:
+            new_timestamp = max(0, int(timestamp))
+
+        self.last_update_timestamp = new_timestamp
+        self.dynamic_like_blacklist.clear()
+        self._save_state()
+
+        logger.info(
+            f"重置 last_update_timestamp：{old_timestamp} -> {self.last_update_timestamp}"
+        )
+        return old_timestamp, self.last_update_timestamp
