@@ -89,8 +89,6 @@ def _merge_group_to_up_mapping(base_mapping: Dict[str, List[str]], group_mapping
 
     for raw_group_id, raw_up_mids in group_mapping.items():
         group_id = _as_str(raw_group_id).strip()
-        if not group_id:
-            continue
 
         for raw_up_mid in _coerce_sequence(raw_up_mids):
             up_mid = _as_str(raw_up_mid).strip()
@@ -98,7 +96,7 @@ def _merge_group_to_up_mapping(base_mapping: Dict[str, List[str]], group_mapping
                 continue
 
             group_list = merged.setdefault(up_mid, [])
-            if group_id not in group_list:
+            if group_id and group_id not in group_list:
                 group_list.append(group_id)
 
     return merged

@@ -78,8 +78,8 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 | --- | --- | --- |
 | `bnotifier_push_updates` | `{}` | 更新推送，格式 `{UP_mid: [group_id, ...]}` |
 | `bnotifier_push_lives` | `{}` | 开播推送，格式 `{UP_mid: [group_id, ...]}` |
-| `bnotifier_push_updates_by_group` | `{}` | 按群配置更新推送，格式 `{group_id: [UP_mid, ...]}` |
-| `bnotifier_push_lives_by_group` | `{}` | 按群配置开播推送，格式 `{group_id: [UP_mid, ...]}` |
+| `bnotifier_push_updates_by_group` | `{}` | 按群配置更新推送，格式 `{group_id: [UP_mid, ...]}`；当 `group_id` 为空字符串时，UP 仍会被记录，但只会发给 `bnotifier_debug_user`，不发群 |
+| `bnotifier_push_lives_by_group` | `{}` | 按群配置开播推送，格式 `{group_id: [UP_mid, ...]}`；当 `group_id` 为空字符串时，UP 仍会被记录，但只会发给 `bnotifier_debug_user`，不发群 |
 | `bnotifier_push_type_blacklist` | `{}` | 动态类型黑名单，格式 `{group_id或UP_mid: [dynamic_type, ...]}` |
 | `bnotifier_debug_user` | `[]` | 额外接收所有推送的QQ私聊用户ID列表 |
 
