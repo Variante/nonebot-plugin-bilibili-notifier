@@ -4,7 +4,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bilibili_api import Credential, request_settings
 from bilibili_api.dynamic import Dynamic, get_live_users
@@ -303,6 +303,19 @@ class BilibiliNotifierService:
 
         return all_items
 
+    async def _get_dynamic_item_by_id(self, dynamic_id: int) -> Optional[Dict[str, Any]]:
+        dynamic_data = await Dynamic(dynamic_id, credential=self.credential).get_info()
+        if not isinstance(dynamic_data, dict):
+            return None
+
+        item = dynamic_data.get("item")
+        if isinstance(item, dict):
+            return item
+
+        if isinstance(dynamic_data.get("modules"), dict):
+            return dynamic_data
+        return None
+
     def _should_auto_like(self, parsed_dynamic: ParsedDynamic) -> bool:
         return (
             parsed_dynamic.mid in self.like_targets
@@ -552,3 +565,39 @@ class BilibiliNotifierService:
             logger.debug(
                 f"{len(current_live_names)} 个用户正在直播：{', '.join(current_live_names)}"
             )
+
+    async def push_dynamic_to_user(self, dynamic_id: int, user_id: str) -> Tuple[bool, str]:
+        qq_user_id = self._parse_qq_id(user_id, "调试用户")
+        if qq_user_id is None:
+            return False, "发送失败：用户ID无效"
+
+        try:
+            dynamic_item = await self._get_dynamic_item_by_id(dynamic_id)
+        except Exception as error:
+            logger.warning(f"按ID获取动态失败（{dynamic_id}）：{error}")
+            return False, f"获取动态失败：{error}"
+
+        if dynamic_item is None:
+            return False, "获取动态失败：返回结构异常"
+
+        parsed_dynamic = parse_dynamic(dynamic_item)
+        if parsed_dynamic is None:
+            return False, "该动态类型暂不支持推送"
+
+        if (
+            parsed_dynamic.origin
+            and self.config.bnotifier_skip_lottery_forward
+            and "中奖" in parsed_dynamic.text
+        ):
+            return False, "该动态命中中奖转发过滤，已跳过"
+
+        try:
+            await self._build_dynamic_notification(parsed_dynamic).send_to(
+                TargetQQPrivate(user_id=qq_user_id)
+            )
+        except Exception as error:
+            logger.warning(f"按ID推送动态失败（{dynamic_id} -> {qq_user_id}）：{error}")
+            return False, f"推送失败：{error}"
+
+        logger.info(f"按ID推送动态成功（{dynamic_id} -> {qq_user_id}）")
+        return True, "ok"

@@ -111,6 +111,13 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 | `bnotifier_persist_state` | `true` | 是否持久化最后动态时间与点赞黑名单 |
 | `bnotifier_state_file` | `"last_update.json"` | 状态文件名（缓存目录下） |
 
+## 🛠️ 调试命令
+
+- 命令：`/dd <动态ID>`
+- 示例：`/dd 1175425797536612360`
+- 权限：发送者必须在 `bnotifier_debug_user` 列表中
+- 行为：按动态ID拉取并解析动态，然后将消息推送给发送者
+
 ## 🍪 cookies 文件格式
 
 支持以下两种格式。
