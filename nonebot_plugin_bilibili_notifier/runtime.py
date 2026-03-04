@@ -260,6 +260,17 @@ class BilibiliNotifierService:
             return True
         return False
 
+    def _get_target_groups(self, targets: Dict[str, List[str]], mid: str, name: str) -> List[str]:
+        """Return merged group list for an UP, matching by both mid and name."""
+        seen: Set[str] = set()
+        result: List[str] = []
+        for key in (mid, name):
+            for group_id in targets.get(key, []):
+                if group_id not in seen:
+                    seen.add(group_id)
+                    result.append(group_id)
+        return result
+
     def _parse_qq_id(self, raw_id: str, id_name: str) -> Optional[int]:
         try:
             return int(raw_id)
@@ -393,7 +404,7 @@ class BilibiliNotifierService:
             logger.info(f"将 {dynamic.name} 的更新消息推送到用户 {user_id}")
             await message.send_to(TargetQQPrivate(user_id=user_id))
 
-        for group_id in self.update_targets.get(dynamic.mid, []):
+        for group_id in self._get_target_groups(self.update_targets, dynamic.mid, dynamic.name):
             if self._is_type_blocked(group_id, dynamic.dynamic_type):
                 continue
 
@@ -431,11 +442,11 @@ class BilibiliNotifierService:
                 if parsed_dynamic.timestamp > 0:
                     dynamic_timestamps.append(parsed_dynamic.timestamp)
 
-                if parsed_dynamic.mid not in self.update_targets:
+                if parsed_dynamic.mid not in self.update_targets and parsed_dynamic.name not in self.update_targets:
                     continue
                 if parsed_dynamic.timestamp <= self.last_update_timestamp:
                     continue
-                if self._is_type_blocked(parsed_dynamic.mid, parsed_dynamic.dynamic_type):
+                if self._is_type_blocked(parsed_dynamic.mid, parsed_dynamic.dynamic_type) or self._is_type_blocked(parsed_dynamic.name, parsed_dynamic.dynamic_type):
                     continue
                 if (
                     parsed_dynamic.origin
@@ -508,7 +519,7 @@ class BilibiliNotifierService:
             logger.info(f"将 {up_name} 的开播消息推送到用户 {user_id}")
             await message.send_to(TargetQQPrivate(user_id=user_id))
 
-        for group_id in self.live_targets.get(up_mid, []):
+        for group_id in self._get_target_groups(self.live_targets, up_mid, up_name):
             qq_group_id = self._parse_qq_id(group_id, "QQ群")
             if qq_group_id is None:
                 continue
@@ -546,7 +557,7 @@ class BilibiliNotifierService:
                 current_live_users.add(up_mid)
                 current_live_names.append(up_name)
 
-                if up_mid not in self.live_targets:
+                if up_mid not in self.live_targets and up_name not in self.live_targets:
                     continue
                 if self.last_live_users is None:
                     continue
