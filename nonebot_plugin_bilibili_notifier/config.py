@@ -18,13 +18,13 @@ class Config(BaseModel):
     bnotifier_like: List[str] = Field(default_factory=list)
 
     # Runtime tuning
-    bnotifier_api_timeout: float = 20
+    bnotifier_api_timeout: float = Field(default=20, gt=0)
     bnotifier_debug_user: List[str] = Field(default_factory=list)
-    bnotifier_dynamic_update_interval: int = 120
-    bnotifier_live_update_interval: int = 60
+    bnotifier_dynamic_update_interval: int = Field(default=120, ge=1)
+    bnotifier_live_update_interval: int = Field(default=60, ge=1)
 
     # Dynamic fetch controls
-    bnotifier_dynamic_pages: int = 1
+    bnotifier_dynamic_pages: int = Field(default=1, ge=1)
     bnotifier_dynamic_features: str = "itemOpusStyle"
     bnotifier_timezone_offset: int = -480
 
@@ -36,7 +36,7 @@ class Config(BaseModel):
     bnotifier_skip_lottery_forward: bool = True
 
     # Live message detail controls
-    bnotifier_live_fetch_size: int = 50
+    bnotifier_live_fetch_size: int = Field(default=50, ge=1)
     bnotifier_live_include_title: bool = True
     bnotifier_live_include_cover: bool = True
 

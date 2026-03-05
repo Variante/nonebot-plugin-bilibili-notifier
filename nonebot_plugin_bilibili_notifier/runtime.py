@@ -4,7 +4,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from bilibili_api import Credential, request_settings
 from bilibili_api.dynamic import Dynamic, get_live_users
@@ -23,6 +23,7 @@ from .parser import parse_dynamic
 BILIBILI_DYNAMIC_API = get_api("dynamic")
 ROOM_URL_PATTERN = re.compile(r"https?://live.bilibili.com/(\d+)")
 COOKIE_KEYS = ("sessdata", "bili_jct", "buvid3", "dedeuserid")
+IntMessageSender = Callable[[int], Awaitable[None]]
 
 
 def _as_str(value: Any) -> str:
@@ -272,6 +273,22 @@ class BilibiliNotifierService:
             logger.warning(f"{id_name} 配置无效：{raw_id}")
             return None
 
+    def _iter_debug_user_ids(self) -> List[int]:
+        user_ids: List[int] = []
+        for debug_user_id in self.debug_users:
+            user_id = self._parse_qq_id(debug_user_id, "调试用户")
+            if user_id is not None:
+                user_ids.append(user_id)
+        return user_ids
+
+    def _iter_target_group_ids(self, targets: Dict[str, List[str]], mid: str, name: str) -> List[int]:
+        group_ids: List[int] = []
+        for group_id in self._get_target_groups(targets, mid, name):
+            qq_group_id = self._parse_qq_id(group_id, "QQ群")
+            if qq_group_id is not None:
+                group_ids.append(qq_group_id)
+        return group_ids
+
     async def _get_dynamic_page_items(self, page_number: int) -> List[Dict[str, Any]]:
         api = BILIBILI_DYNAMIC_API["info"]["dynamic_page_info"]
         params = {
@@ -396,42 +413,53 @@ class BilibiliNotifierService:
             and "中奖" in dynamic.text
         )
 
-    async def _send_dynamic_to_private(self, dynamic: ParsedDynamic, user_id: int) -> None:
+    def _build_dynamic_senders(self, dynamic: ParsedDynamic) -> Tuple[IntMessageSender, IntMessageSender]:
         if self.config.bnotifier_use_saa:
-            from nonebot_plugin_saa import TargetQQPrivate
-            await self._build_saa_dynamic_notification(dynamic).send_to(TargetQQPrivate(user_id=user_id))
+            from nonebot_plugin_saa import TargetQQGroup, TargetQQPrivate
+
+            message = self._build_saa_dynamic_notification(dynamic)
+
+            async def send_private(user_id: int) -> None:
+                await message.send_to(TargetQQPrivate(user_id=user_id))
+
+            async def send_group(group_id: int) -> None:
+                await message.send_to(TargetQQGroup(group_id=group_id))
         else:
             bot = get_bot()
             messages = self._build_ob11_dynamic_messages(dynamic)
             nodes = [{"type": "node", "data": {"uin": bot.self_id, "content": msg}} for msg in messages]
-            await bot.send_private_forward_msg(user_id=user_id, messages=nodes, source=dynamic.action)
+
+            async def send_private(user_id: int) -> None:
+                await bot.send_private_forward_msg(user_id=user_id, messages=nodes, source=dynamic.action)
+
+            async def send_group(group_id: int) -> None:
+                await bot.send_group_forward_msg(group_id=group_id, messages=nodes, source=dynamic.action)
+
+        return send_private, send_group
 
     async def _send_update_notification(self, dynamic: ParsedDynamic) -> None:
-        for debug_user_id in self.debug_users:
-            user_id = self._parse_qq_id(debug_user_id, "调试用户")
-            if user_id is None:
-                continue
-            logger.info(f"将 {dynamic.name} 的更新消息推送到用户 {user_id}")
-            await self._send_dynamic_to_private(dynamic, user_id)
+        send_private, send_group = self._build_dynamic_senders(dynamic)
 
-        if self.config.bnotifier_use_saa:
-            from nonebot_plugin_saa import TargetQQGroup
-            message = self._build_saa_dynamic_notification(dynamic)
-            send_group = lambda qq_id: message.send_to(TargetQQGroup(group_id=qq_id))
-        else:
-            bot = get_bot()
-            messages = self._build_ob11_dynamic_messages(dynamic)
-            nodes = [{"type": "node", "data": {"uin": bot.self_id, "content": msg}} for msg in messages]
-            send_group = lambda qq_id: bot.send_group_forward_msg(group_id=qq_id, messages=nodes, source=dynamic.action)
+        for user_id in self._iter_debug_user_ids():
+            logger.info(f"将 {dynamic.name} 的更新消息推送到用户 {user_id}")
+            try:
+                await send_private(user_id)
+            except Exception as error:
+                logger.warning(f"给用户 {user_id} 推送 {dynamic.name} 更新失败：{error}")
 
         for group_id in self._get_target_groups(self.update_targets, dynamic.mid, dynamic.name):
             if self._is_type_blocked(group_id, dynamic.dynamic_type):
                 continue
+
             qq_group_id = self._parse_qq_id(group_id, "QQ群")
             if qq_group_id is None:
                 continue
+
             logger.info(f"将 {dynamic.name} 的更新消息推送到群 {qq_group_id}")
-            await send_group(qq_group_id)
+            try:
+                await send_group(qq_group_id)
+            except Exception as error:
+                logger.warning(f"给群 {qq_group_id} 推送 {dynamic.name} 更新失败：{error}")
 
     async def fetch_bilibili_updates(self) -> None:
         if not self.update_targets and not self.like_targets:
@@ -523,48 +551,45 @@ class BilibiliNotifierService:
 
         return segments
 
-    async def _send_live_notification(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
+    def _build_live_senders(self, message_segments: List[MessageSegment]) -> Tuple[IntMessageSender, IntMessageSender]:
         if self.config.bnotifier_use_saa:
-            await self._send_live_notification_saa(up_mid, up_name, message_segments)
+            from nonebot_plugin_saa import MessageFactory, TargetQQGroup, TargetQQPrivate
+
+            message = MessageFactory([_seg_to_saa(s) for s in message_segments])
+
+            async def send_private(user_id: int) -> None:
+                await message.send_to(TargetQQPrivate(user_id=user_id))
+
+            async def send_group(group_id: int) -> None:
+                await message.send_to(TargetQQGroup(group_id=group_id))
         else:
-            await self._send_live_notification_direct(up_mid, up_name, message_segments)
+            bot = get_bot()
+            message = Message(message_segments)
 
-    async def _send_live_notification_saa(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
-        from nonebot_plugin_saa import MessageFactory, TargetQQGroup, TargetQQPrivate
+            async def send_private(user_id: int) -> None:
+                await bot.send_private_msg(user_id=user_id, message=message)
 
-        message = MessageFactory([_seg_to_saa(s) for s in message_segments])
+            async def send_group(group_id: int) -> None:
+                await bot.send_group_msg(group_id=group_id, message=message)
 
-        for debug_user_id in self.debug_users:
-            user_id = self._parse_qq_id(debug_user_id, "调试用户")
-            if user_id is None:
-                continue
+        return send_private, send_group
+
+    async def _send_live_notification(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
+        send_private, send_group = self._build_live_senders(message_segments)
+
+        for user_id in self._iter_debug_user_ids():
             logger.info(f"将 {up_name} 的开播消息推送到用户 {user_id}")
-            await message.send_to(TargetQQPrivate(user_id=user_id))
+            try:
+                await send_private(user_id)
+            except Exception as error:
+                logger.warning(f"给用户 {user_id} 推送 {up_name} 开播消息失败：{error}")
 
-        for group_id in self._get_target_groups(self.live_targets, up_mid, up_name):
-            qq_group_id = self._parse_qq_id(group_id, "QQ群")
-            if qq_group_id is None:
-                continue
+        for qq_group_id in self._iter_target_group_ids(self.live_targets, up_mid, up_name):
             logger.info(f"将 {up_name} 的开播消息推送到群 {qq_group_id}")
-            await message.send_to(TargetQQGroup(group_id=qq_group_id))
-
-    async def _send_live_notification_direct(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
-        bot = get_bot()
-        message = Message(message_segments)
-
-        for debug_user_id in self.debug_users:
-            user_id = self._parse_qq_id(debug_user_id, "调试用户")
-            if user_id is None:
-                continue
-            logger.info(f"将 {up_name} 的开播消息推送到用户 {user_id}")
-            await bot.send_private_msg(user_id=user_id, message=message)
-
-        for group_id in self._get_target_groups(self.live_targets, up_mid, up_name):
-            qq_group_id = self._parse_qq_id(group_id, "QQ群")
-            if qq_group_id is None:
-                continue
-            logger.info(f"将 {up_name} 的开播消息推送到群 {qq_group_id}")
-            await bot.send_group_msg(group_id=qq_group_id, message=message)
+            try:
+                await send_group(qq_group_id)
+            except Exception as error:
+                logger.warning(f"给群 {qq_group_id} 推送 {up_name} 开播消息失败：{error}")
 
     async def fetch_bilibili_live_info(self) -> None:
         if not self.live_targets:
@@ -637,16 +662,8 @@ class BilibiliNotifierService:
             return False, "该动态命中中奖转发过滤，已跳过"
 
         try:
-            if self.config.bnotifier_use_saa:
-                from nonebot_plugin_saa import TargetQQPrivate
-                await self._build_saa_dynamic_notification(parsed_dynamic).send_to(
-                    TargetQQPrivate(user_id=qq_user_id)
-                )
-            else:
-                bot = get_bot()
-                messages = self._build_ob11_dynamic_messages(parsed_dynamic)
-                nodes = [{"type": "node", "data": {"uin": bot.self_id, "content": msg}} for msg in messages]
-                await bot.send_private_forward_msg(user_id=qq_user_id, messages=nodes, source=parsed_dynamic.action)
+            send_private, _ = self._build_dynamic_senders(parsed_dynamic)
+            await send_private(qq_user_id)
         except Exception as error:
             logger.warning(f"按ID推送动态失败（{dynamic_id} -> {qq_user_id}）：{error}")
             return False, f"推送失败：{error}"
