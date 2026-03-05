@@ -1,8 +1,16 @@
 from typing import Any, Dict, List, Optional
 
-from nonebot_plugin_saa import Image, Text
+from nonebot.adapters.onebot.v11 import MessageSegment
 
 from .models import ParsedDynamic
+
+
+def Text(text: str) -> MessageSegment:
+    return MessageSegment.text(text)
+
+
+def Image(url: str) -> MessageSegment:
+    return MessageSegment.image(url)
 
 TEXT_NODE_TYPES = {
     "RICH_TEXT_NODE_TYPE_TEXT",
@@ -95,6 +103,7 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
     timestamp = _as_int(author_info.get("pub_ts"), default=0)
 
     text = ""
+    action = ""
     message: List[Any] = []
     raw_url = ""
     origin: Optional[ParsedDynamic] = None
@@ -110,9 +119,11 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
             archive = {}
 
         title = _as_str(archive.get("title")).strip()
-        action = pub_action or "发布了视频"
-        text = f"{action}：\n{title}".strip()
-        message = [Text(text)]
+        action = pub_action or "发布视频"
+        text = f"{action}：{title}".strip()
+        message = []
+        if title:
+            message.append(Text(title))
 
         cover = _as_str(archive.get("cover")).strip()
         if cover:
@@ -137,12 +148,11 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
         title = _as_str(opus.get("title")).strip()
         summary_text = _as_str(summary.get("text"))
 
-        header_text = "发布了动态：\n"
+        action = pub_action or "发布动态"
+        text = f"{action}：\n{title}\n{summary_text}".strip()
+        message = []
         if title:
-            header_text += f"{title}\n"
-
-        text = f"{header_text}{summary_text}".rstrip()
-        message = [Text(header_text)]
+            message.append(Text(title + "\n"))
 
         rich_text_segments = parse_rich_text(summary.get("rich_text_nodes"))
         if rich_text_segments:
@@ -176,9 +186,11 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
             opus = major.get("article") if isinstance(major.get("article"), dict) else {}
 
         title = _as_str(opus.get("title")).strip()
-        action = pub_action or "发布了专栏"
-        text = f"{action}：\n{title}".strip()
-        message = [Text(text)]
+        action = pub_action or "发布专栏"
+        text = f"{action}：{title}".strip()
+        message = []
+        if title:
+            message.append(Text(title))
 
         raw_url = _as_str(basic.get("jump_url")).strip()
 
@@ -192,8 +204,9 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
             desc = {}
 
         desc_text = _as_str(desc.get("text"))
-        text = f"转发了：\n{desc_text}".rstrip()
-        message = [Text("转发了：\n")]
+        action = pub_action or "转发动态"
+        text = f"{action}\n{desc_text}".rstrip()
+        message = []
 
         rich_text_segments = parse_rich_text(desc.get("rich_text_nodes"))
         if rich_text_segments:
@@ -223,5 +236,6 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
         text=text,
         message=message,
         url=_normalize_url(raw_url),
+        action=f'{name} {action}',
         origin=origin,
     )

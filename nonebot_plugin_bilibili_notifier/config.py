@@ -28,6 +28,9 @@ class Config(BaseModel):
     bnotifier_dynamic_features: str = "itemOpusStyle"
     bnotifier_timezone_offset: int = -480
 
+    # Adapter
+    bnotifier_use_saa: bool = True
+
     # Message behavior
     bnotifier_forward_message_mode: Literal["full", "none"] = "full"
     bnotifier_skip_lottery_forward: bool = True

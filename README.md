@@ -31,7 +31,7 @@ _✨ B站UP更新与开播通知插件 ✨_
 - 转发动态原文控制（全文/关闭）
 - 动态多页抓取
 
-理论上支持 [SAA](https://github.com/MountainDash/nonebot-plugin-send-anything-anywhere) 支持的所有平台，OneBot v11 已验证可用。
+默认使用 [SAA](https://github.com/MountainDash/nonebot-plugin-send-anything-anywhere) 发送消息（理论上支持 SAA 支持的所有平台）。也可以通过 `bnotifier_use_saa = false` 关闭 SAA 依赖，直接使用 OneBot v11 原生 API 发送，此时无需安装 SAA。
 
 ## 💿 安装
 
@@ -91,6 +91,12 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 | `bnotifier_like` | `[]` | 自动点赞目标（UP mid 或昵称） |
 | `bnotifier_forward_message_mode` | `"full"` | 转发原文模式：`full`/`none` |
 | `bnotifier_skip_lottery_forward` | `true` | 是否跳过包含“中奖”的转发动态 |
+
+### 适配器
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `bnotifier_use_saa` | `true` | 是否使用 SAA 发送消息。`true` 时依赖 `nonebot-plugin-saa` 并支持多平台；`false` 时直接调用 OneBot v11 API，无需 SAA |
 
 ### 拉取与性能
 
@@ -163,6 +169,9 @@ bnotifier_push_lives={"823532":["123456"]}
 
 bnotifier_like=["823532"]
 bnotifier_debug_user=["10001"]
+
+# 直接使用 OneBot v11 发送（不需要安装 SAA）
+bnotifier_use_saa=false
 ```
 
 ## 其它

@@ -11,16 +11,10 @@ from bilibili_api.dynamic import Dynamic, get_live_users
 from bilibili_api.live import LiveRoom
 from bilibili_api.utils.network import Api
 from bilibili_api.utils.utils import get_api
+from nonebot import get_bot
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.log import logger
 from nonebot_plugin_localstore import get_cache_file
-from nonebot_plugin_saa import (
-    AggregatedMessageFactory,
-    Image,
-    MessageFactory,
-    TargetQQGroup,
-    TargetQQPrivate,
-    Text,
-)
 
 from .config import Config
 from .models import ParsedDynamic
@@ -61,6 +55,13 @@ def _coerce_sequence(value: Any) -> List[Any]:
 
 def clean_url(url: str) -> str:
     return _as_str(url).split("?", 1)[0]
+
+
+def _seg_to_saa(seg: MessageSegment):
+    from nonebot_plugin_saa import Text, Image
+    if seg.type == "text":
+        return Text(seg.data["text"])
+    return Image(seg.data.get("file", ""))
 
 
 def _normalize_up_to_group_mapping(raw_mapping: Any) -> Dict[str, List[str]]:
@@ -262,14 +263,7 @@ class BilibiliNotifierService:
 
     def _get_target_groups(self, targets: Dict[str, List[str]], mid: str, name: str) -> List[str]:
         """Return merged group list for an UP, matching by both mid and name."""
-        seen: Set[str] = set()
-        result: List[str] = []
-        for key in (mid, name):
-            for group_id in targets.get(key, []):
-                if group_id not in seen:
-                    seen.add(group_id)
-                    result.append(group_id)
-        return result
+        return list(dict.fromkeys(targets.get(mid, []) + targets.get(name, [])))
 
     def _parse_qq_id(self, raw_id: str, id_name: str) -> Optional[int]:
         try:
@@ -370,50 +364,75 @@ class BilibiliNotifierService:
         logger.warning(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞失败")
         next_blacklist.add(dynamic_id)
 
-    def _build_dynamic_message_segments(self, dynamic: ParsedDynamic) -> List[Any]:
-        return [Text(f"{dynamic.name} ")] + list(dynamic.message)
+    def _build_dynamic_message_segments(self, dynamic: ParsedDynamic) -> List[MessageSegment]:
+        header = f"{dynamic.name} {dynamic.action}".strip()
+        return [MessageSegment.text(header)] + list(dynamic.message)
 
-    def _build_dynamic_notification(self, dynamic: ParsedDynamic) -> AggregatedMessageFactory:
-        messages = [
-            MessageFactory(
-                self._build_dynamic_message_segments(dynamic)
-            )
-        ]
-
+    def _build_ob11_dynamic_messages(self, dynamic: ParsedDynamic) -> List[Message]:
+        messages = [Message(self._build_dynamic_message_segments(dynamic))]
         if dynamic.origin and self.config.bnotifier_forward_message_mode != "none":
-            messages.append(MessageFactory("被转发的动态:"))
-            messages.append(
-                MessageFactory(
-                    self._build_dynamic_message_segments(dynamic.origin)
-                )
-            )
-
+            messages.append(Message([MessageSegment.text("被转发的动态:")]))
+            messages.append(Message(self._build_dynamic_message_segments(dynamic.origin)))
         dynamic_url = clean_url(dynamic.url)
         if dynamic_url:
-            messages.append(MessageFactory(f"动态链接：{dynamic_url}"))
+            messages.append(Message([MessageSegment.text(f"动态链接：{dynamic_url}")]))
+        return messages
 
+    def _build_saa_dynamic_notification(self, dynamic: ParsedDynamic):
+        from nonebot_plugin_saa import AggregatedMessageFactory, MessageFactory, Text
+
+        messages = [MessageFactory([_seg_to_saa(s) for s in self._build_dynamic_message_segments(dynamic)])]
+        if dynamic.origin and self.config.bnotifier_forward_message_mode != "none":
+            messages.append(MessageFactory([Text("被转发的动态:")]))
+            messages.append(MessageFactory([_seg_to_saa(s) for s in self._build_dynamic_message_segments(dynamic.origin)]))
+        dynamic_url = clean_url(dynamic.url)
+        if dynamic_url:
+            messages.append(MessageFactory([Text(f"动态链接：{dynamic_url}")]))
         return AggregatedMessageFactory(messages)
 
-    async def _send_update_notification(self, dynamic: ParsedDynamic) -> None:
-        message = self._build_dynamic_notification(dynamic)
+    def _is_lottery_forward(self, dynamic: ParsedDynamic) -> bool:
+        return (
+            dynamic.origin is not None
+            and self.config.bnotifier_skip_lottery_forward
+            and "中奖" in dynamic.text
+        )
 
+    async def _send_dynamic_to_private(self, dynamic: ParsedDynamic, user_id: int) -> None:
+        if self.config.bnotifier_use_saa:
+            from nonebot_plugin_saa import TargetQQPrivate
+            await self._build_saa_dynamic_notification(dynamic).send_to(TargetQQPrivate(user_id=user_id))
+        else:
+            bot = get_bot()
+            messages = self._build_ob11_dynamic_messages(dynamic)
+            nodes = [{"type": "node", "data": {"uin": bot.self_id, "content": msg}} for msg in messages]
+            await bot.send_private_forward_msg(user_id=user_id, messages=nodes, source=dynamic.action)
+
+    async def _send_update_notification(self, dynamic: ParsedDynamic) -> None:
         for debug_user_id in self.debug_users:
             user_id = self._parse_qq_id(debug_user_id, "调试用户")
             if user_id is None:
                 continue
             logger.info(f"将 {dynamic.name} 的更新消息推送到用户 {user_id}")
-            await message.send_to(TargetQQPrivate(user_id=user_id))
+            await self._send_dynamic_to_private(dynamic, user_id)
+
+        if self.config.bnotifier_use_saa:
+            from nonebot_plugin_saa import TargetQQGroup
+            message = self._build_saa_dynamic_notification(dynamic)
+            send_group = lambda qq_id: message.send_to(TargetQQGroup(group_id=qq_id))
+        else:
+            bot = get_bot()
+            messages = self._build_ob11_dynamic_messages(dynamic)
+            nodes = [{"type": "node", "data": {"uin": bot.self_id, "content": msg}} for msg in messages]
+            send_group = lambda qq_id: bot.send_group_forward_msg(group_id=qq_id, messages=nodes, source=dynamic.action)
 
         for group_id in self._get_target_groups(self.update_targets, dynamic.mid, dynamic.name):
             if self._is_type_blocked(group_id, dynamic.dynamic_type):
                 continue
-
             qq_group_id = self._parse_qq_id(group_id, "QQ群")
             if qq_group_id is None:
                 continue
-
             logger.info(f"将 {dynamic.name} 的更新消息推送到群 {qq_group_id}")
-            await message.send_to(TargetQQGroup(group_id=qq_group_id))
+            await send_group(qq_group_id)
 
     async def fetch_bilibili_updates(self) -> None:
         if not self.update_targets and not self.like_targets:
@@ -448,11 +467,7 @@ class BilibiliNotifierService:
                     continue
                 if self._is_type_blocked(parsed_dynamic.mid, parsed_dynamic.dynamic_type) or self._is_type_blocked(parsed_dynamic.name, parsed_dynamic.dynamic_type):
                     continue
-                if (
-                    parsed_dynamic.origin
-                    and self.config.bnotifier_skip_lottery_forward
-                    and "中奖" in parsed_dynamic.text
-                ):
+                if self._is_lottery_forward(parsed_dynamic):
                     logger.info(f"跳过 {parsed_dynamic.name} 的中奖动态：{parsed_dynamic.text}")
                     continue
 
@@ -475,9 +490,9 @@ class BilibiliNotifierService:
             return None
         return _as_int(matched.group(1), default=0) or None
 
-    async def _build_live_notification_message(self, up_name: str, live_user: Dict[str, Any]) -> List[Any]:
+    async def _build_live_notification_message(self, up_name: str, live_user: Dict[str, Any]) -> List[MessageSegment]:
         room_url = clean_url(_as_str(live_user.get("link")))
-        segments: List[Any] = [Text(f"{up_name} 开始直播了：{room_url}")]
+        segments: List[MessageSegment] = [MessageSegment.text(f"{up_name} 开始直播了：{room_url}")]
 
         if not self.config.bnotifier_live_include_title and not self.config.bnotifier_live_include_cover:
             return segments
@@ -500,17 +515,25 @@ class BilibiliNotifierService:
         if self.config.bnotifier_live_include_title:
             title = _as_str(room_detail.get("title")).strip()
             if title:
-                segments.append(Text(f"\n标题：{title}"))
+                segments.append(MessageSegment.text(f"\n标题：{title}"))
 
         if self.config.bnotifier_live_include_cover:
             cover = _as_str(room_detail.get("cover")).strip()
             if cover:
-                segments.append(Image(cover))
+                segments.append(MessageSegment.image(cover))
 
         return segments
 
-    async def _send_live_notification(self, up_mid: str, up_name: str, message_segments: List[Any]) -> None:
-        message = MessageFactory(message_segments)
+    async def _send_live_notification(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
+        if self.config.bnotifier_use_saa:
+            await self._send_live_notification_saa(up_mid, up_name, message_segments)
+        else:
+            await self._send_live_notification_direct(up_mid, up_name, message_segments)
+
+    async def _send_live_notification_saa(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
+        from nonebot_plugin_saa import MessageFactory, TargetQQGroup, TargetQQPrivate
+
+        message = MessageFactory([_seg_to_saa(s) for s in message_segments])
 
         for debug_user_id in self.debug_users:
             user_id = self._parse_qq_id(debug_user_id, "调试用户")
@@ -525,6 +548,24 @@ class BilibiliNotifierService:
                 continue
             logger.info(f"将 {up_name} 的开播消息推送到群 {qq_group_id}")
             await message.send_to(TargetQQGroup(group_id=qq_group_id))
+
+    async def _send_live_notification_direct(self, up_mid: str, up_name: str, message_segments: List[MessageSegment]) -> None:
+        bot = get_bot()
+        message = Message(message_segments)
+
+        for debug_user_id in self.debug_users:
+            user_id = self._parse_qq_id(debug_user_id, "调试用户")
+            if user_id is None:
+                continue
+            logger.info(f"将 {up_name} 的开播消息推送到用户 {user_id}")
+            await bot.send_private_msg(user_id=user_id, message=message)
+
+        for group_id in self._get_target_groups(self.live_targets, up_mid, up_name):
+            qq_group_id = self._parse_qq_id(group_id, "QQ群")
+            if qq_group_id is None:
+                continue
+            logger.info(f"将 {up_name} 的开播消息推送到群 {qq_group_id}")
+            await bot.send_group_msg(group_id=qq_group_id, message=message)
 
     async def fetch_bilibili_live_info(self) -> None:
         if not self.live_targets:
@@ -593,17 +634,20 @@ class BilibiliNotifierService:
         if parsed_dynamic is None:
             return False, "该动态类型暂不支持推送"
 
-        if (
-            parsed_dynamic.origin
-            and self.config.bnotifier_skip_lottery_forward
-            and "中奖" in parsed_dynamic.text
-        ):
+        if self._is_lottery_forward(parsed_dynamic):
             return False, "该动态命中中奖转发过滤，已跳过"
 
         try:
-            await self._build_dynamic_notification(parsed_dynamic).send_to(
-                TargetQQPrivate(user_id=qq_user_id)
-            )
+            if self.config.bnotifier_use_saa:
+                from nonebot_plugin_saa import TargetQQPrivate
+                await self._build_saa_dynamic_notification(parsed_dynamic).send_to(
+                    TargetQQPrivate(user_id=qq_user_id)
+                )
+            else:
+                bot = get_bot()
+                messages = self._build_ob11_dynamic_messages(parsed_dynamic)
+                nodes = [{"type": "node", "data": {"uin": bot.self_id, "content": msg}} for msg in messages]
+                await bot.send_private_forward_msg(user_id=qq_user_id, messages=nodes, source=parsed_dynamic.action)
         except Exception as error:
             logger.warning(f"按ID推送动态失败（{dynamic_id} -> {qq_user_id}）：{error}")
             return False, f"推送失败：{error}"

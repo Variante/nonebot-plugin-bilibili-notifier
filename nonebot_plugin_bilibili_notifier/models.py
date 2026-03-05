@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
-
-MessageSegment = Any
+from nonebot.adapters.onebot.v11 import MessageSegment
 
 
 @dataclass
@@ -14,4 +13,5 @@ class ParsedDynamic:
     text: str
     message: List[MessageSegment]
     url: str
+    action: str = ""
     origin: Optional["ParsedDynamic"] = None
