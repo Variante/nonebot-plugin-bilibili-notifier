@@ -365,8 +365,7 @@ class BilibiliNotifierService:
         next_blacklist.add(dynamic_id)
 
     def _build_dynamic_message_segments(self, dynamic: ParsedDynamic) -> List[MessageSegment]:
-        header = f"{dynamic.name} {dynamic.action}".strip()
-        return [MessageSegment.text(header)] + list(dynamic.message)
+        return [MessageSegment.text(dynamic.action + '：\n')] + list(dynamic.message)
 
     def _build_ob11_dynamic_messages(self, dynamic: ParsedDynamic) -> List[Message]:
         messages = [Message(self._build_dynamic_message_segments(dynamic))]
