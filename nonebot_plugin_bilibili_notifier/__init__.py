@@ -10,17 +10,19 @@ from nonebot.rule import Rule
 
 require("nonebot_plugin_apscheduler")
 require("nonebot_plugin_localstore")
-require("nonebot_plugin_saa")
-
-from nonebot_plugin_apscheduler import scheduler
-from nonebot_plugin_saa import enable_auto_select_bot
 
 from .config import Config
-from .runtime import BilibiliNotifierService
-
-enable_auto_select_bot()
 
 config = get_plugin_config(Config)
+
+if config.bnotifier_use_saa:
+    require("nonebot_plugin_saa")
+    from nonebot_plugin_saa import enable_auto_select_bot
+    enable_auto_select_bot()
+
+from nonebot_plugin_apscheduler import scheduler
+
+from .runtime import BilibiliNotifierService
 logger.debug(config)
 service = BilibiliNotifierService(config)
 
@@ -36,10 +38,7 @@ async def fetch_bilibili_live_info() -> None:
 
 
 async def is_sender_debug_user(event: Event) -> bool:
-    sender_user_id = event.get_user_id()
-    if sender_user_id in service.debug_users:
-        return True
-    return False
+    return event.get_user_id() in service.debug_users
 
 
 def _extract_dynamic_id(arg_text: str) -> Optional[int]:
@@ -52,9 +51,7 @@ def _extract_dynamic_id(arg_text: str) -> Optional[int]:
 
 def _extract_timestamp(arg_text: str) -> Optional[int]:
     text = arg_text.strip()
-    if not text:
-        return None
-    if not re.fullmatch(r"\d+", text):
+    if not text or not re.fullmatch(r"\d+", text):
         return None
     return int(text)
 

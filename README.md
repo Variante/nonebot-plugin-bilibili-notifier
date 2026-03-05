@@ -27,10 +27,11 @@ _✨ B站UP更新与开播通知插件 ✨_
 - 动态/视频更新推送
 - 开播推送
 - 自动点赞（按UP mid 或昵称）
+- 推送目标支持按 UP mid 或昵称配置
 - 转发动态原文控制（全文/关闭）
 - 动态多页抓取
 
-理论上支持 [SAA](https://github.com/MountainDash/nonebot-plugin-send-anything-anywhere) 支持的所有平台，OneBot v11 已验证可用。
+默认使用 [SAA](https://github.com/MountainDash/nonebot-plugin-send-anything-anywhere) 发送消息（理论上支持 SAA 支持的所有平台）。也可以通过 `bnotifier_use_saa = false` 关闭 SAA 依赖，直接使用 OneBot v11 原生 API 发送，此时无需安装 SAA。
 
 ## 💿 安装
 
@@ -76,11 +77,11 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `bnotifier_push_updates` | `{}` | 更新推送，格式 `{UP_mid: [group_id, ...]}` |
-| `bnotifier_push_lives` | `{}` | 开播推送，格式 `{UP_mid: [group_id, ...]}` |
-| `bnotifier_push_updates_by_group` | `{}` | 按群配置更新推送，格式 `{group_id: [UP_mid, ...]}`；当 `group_id` 为空字符串时，UP 仍会被记录，但只会发给 `bnotifier_debug_user`，不发群 |
-| `bnotifier_push_lives_by_group` | `{}` | 按群配置开播推送，格式 `{group_id: [UP_mid, ...]}`；当 `group_id` 为空字符串时，UP 仍会被记录，但只会发给 `bnotifier_debug_user`，不发群 |
-| `bnotifier_push_type_blacklist` | `{}` | 动态类型黑名单，格式 `{group_id或UP_mid: [dynamic_type, ...]}` |
+| `bnotifier_push_updates` | `{}` | 更新推送，格式 `{UP标识: [group_id, ...]}`，UP标识可为 mid 或昵称 |
+| `bnotifier_push_lives` | `{}` | 开播推送，格式 `{UP标识: [group_id, ...]}`，UP标识可为 mid 或昵称 |
+| `bnotifier_push_updates_by_group` | `{}` | 按群配置更新推送，格式 `{group_id: [UP标识, ...]}`，UP标识可为 mid 或昵称；当 `group_id` 为空字符串时，UP 仍会被记录，但只会发给 `bnotifier_debug_user`，不发群 |
+| `bnotifier_push_lives_by_group` | `{}` | 按群配置开播推送，格式 `{group_id: [UP标识, ...]}`，UP标识可为 mid 或昵称；当 `group_id` 为空字符串时，UP 仍会被记录，但只会发给 `bnotifier_debug_user`，不发群 |
+| `bnotifier_push_type_blacklist` | `{}` | 动态类型黑名单，格式 `{group_id或UP标识: [dynamic_type, ...]}`，UP标识可为 mid 或昵称 |
 | `bnotifier_debug_user` | `[]` | 额外接收所有推送的QQ私聊用户ID列表 |
 
 ### 业务行为
@@ -90,6 +91,12 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 | `bnotifier_like` | `[]` | 自动点赞目标（UP mid 或昵称） |
 | `bnotifier_forward_message_mode` | `"full"` | 转发原文模式：`full`/`none` |
 | `bnotifier_skip_lottery_forward` | `true` | 是否跳过包含“中奖”的转发动态 |
+
+### 适配器
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `bnotifier_use_saa` | `true` | 是否使用 SAA 发送消息。`true` 时依赖 `nonebot-plugin-saa` 并支持多平台；`false` 时直接调用 OneBot v11 API，无需 SAA |
 
 ### 拉取与性能
 
@@ -153,11 +160,18 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 ```env
 bnotifier_cookies="/path/to/cookies.json"
 
+# 按 mid 配置（数字UID）
 bnotifier_push_updates={"823532":["123456"]}
 bnotifier_push_lives={"823532":["123456"]}
 
+# 也可以用昵称配置
+# bnotifier_push_updates={"某UP主":["123456"]}
+
 bnotifier_like=["823532"]
 bnotifier_debug_user=["10001"]
+
+# 直接使用 OneBot v11 发送（不需要安装 SAA）
+bnotifier_use_saa=false
 ```
 
 ## 其它
