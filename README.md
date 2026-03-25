@@ -120,7 +120,7 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 ## 🛠️ 调试命令
 
 - 命令：`/bnotifier_parse <动态ID>`
-- 示例：`/bnotifier_parse 1175425797536612360`
+- 示例：`/bnotifier_parse 859921215107629064`
 - 权限：发送者必须在 `bnotifier_debug_user` 列表或 NoneBot `SUPERUSERS` 中
 - 行为：按动态ID拉取并解析动态，然后将消息推送给发送者
 
