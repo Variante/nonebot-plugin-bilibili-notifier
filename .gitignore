@@ -176,3 +176,4 @@ pyrightconfig.json
 !.vscode/*.code-snippets
 
 *.sh
+CLAUDE.md

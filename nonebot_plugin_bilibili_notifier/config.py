@@ -42,5 +42,4 @@ class Config(BaseModel):
 
     # State behavior
     bnotifier_ignore_old_dynamic_on_start: bool = True
-    bnotifier_persist_state: bool = True
     bnotifier_state_file: str = "last_update.json"

@@ -93,6 +93,8 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
     if not isinstance(author_info, dict):
         return None
 
+    id_str = _as_str(dynamic_data.get("id_str")).strip()
+
     dynamic_type = _as_str(dynamic_data.get("type"))
     if not dynamic_type or dynamic_type in SKIPPED_DYNAMIC_TYPES:
         return None
@@ -236,6 +238,7 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
         text=text,
         message=message,
         url=_normalize_url(raw_url),
+        id_str=id_str,
         action=f'{name} {action}',
         origin=origin,
     )

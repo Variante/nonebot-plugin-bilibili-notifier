@@ -13,5 +13,6 @@ class ParsedDynamic:
     text: str
     message: List[MessageSegment]
     url: str
+    id_str: str = ""
     action: str = ""
     origin: Optional["ParsedDynamic"] = None

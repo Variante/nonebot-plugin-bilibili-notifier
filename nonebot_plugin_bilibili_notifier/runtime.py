@@ -1,7 +1,5 @@
-import datetime
 import json
 import re
-import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
@@ -24,7 +22,6 @@ BILIBILI_DYNAMIC_API = get_api("dynamic")
 ROOM_URL_PATTERN = re.compile(r"https?://live.bilibili.com/(\d+)")
 COOKIE_KEYS = ("sessdata", "bili_jct", "buvid3", "dedeuserid")
 IntMessageSender = Callable[[int], Awaitable[None]]
-
 
 def _as_str(value: Any) -> str:
     if value is None:
@@ -56,6 +53,7 @@ def _coerce_sequence(value: Any) -> List[Any]:
 
 def clean_url(url: str) -> str:
     return _as_str(url).split("?", 1)[0]
+
 
 
 def _seg_to_saa(seg: MessageSegment):
@@ -204,55 +202,30 @@ class BilibiliNotifierService:
         state_filename = _as_str(config.bnotifier_state_file).strip() or "last_update.json"
         self.state_file = get_cache_file("bilibili-notifier", state_filename)
 
-        self.last_update_timestamp = self._resolve_start_timestamp()
-        self.dynamic_like_blacklist: Set[int] = set()
+        self.known_dynamic_ids: Set[str] = set()
         self.last_live_users: Optional[Set[str]] = None
 
         self._load_state()
 
-    def _resolve_start_timestamp(self) -> int:
-        if self.config.bnotifier_ignore_old_dynamic_on_start:
-            return int(time.time())
-        return 0
-
     def _load_state(self) -> None:
-        if not self.config.bnotifier_persist_state:
-            logger.info("状态持久化已关闭，运行时不会读写动态状态缓存")
-            return
-
         try:
             with open(self.state_file, "r", encoding="utf-8") as file:
                 state_data = json.load(file)
 
-            saved_timestamp = _as_int(state_data.get("last_update"), default=self.last_update_timestamp)
-            raw_blacklist = state_data.get("dyna_blacklist", [])
-            parsed_blacklist = {
-                _as_int(dynamic_id, default=-1)
-                for dynamic_id in _coerce_sequence(raw_blacklist)
-            }
-
-            self.last_update_timestamp = saved_timestamp
-            self.dynamic_like_blacklist = {
-                dynamic_id for dynamic_id in parsed_blacklist if dynamic_id > 0
-            }
-
-            last_update_text = datetime.datetime.fromtimestamp(self.last_update_timestamp).strftime("%Y-%m-%d %H:%M:%S")
-            logger.info(
-                f"加载上次更新时间：{last_update_text}（{self.last_update_timestamp}）"
-            )
+            ids = state_data.get("known_dynamic_ids")
+            if ids is None:
+                logger.info("检测到旧格式状态文件，将在首次拉取时重新初始化")
+                return
+            if isinstance(ids, list):
+                self.known_dynamic_ids = {str(i) for i in ids if i}
+            logger.info(f"加载已知动态ID：{len(self.known_dynamic_ids)} 条")
         except FileNotFoundError:
-            logger.warning("未找到上次更新时间缓存，使用启动策略初始化时间戳")
+            logger.warning("未找到状态缓存文件，将在首次拉取时初始化")
         except Exception as error:
-            logger.warning(f"读取状态缓存失败，使用启动策略初始化时间戳：{error}")
+            logger.warning(f"读取状态缓存失败：{error}")
 
     def _save_state(self) -> None:
-        if not self.config.bnotifier_persist_state:
-            return
-
-        payload = {
-            "last_update": self.last_update_timestamp,
-            "dyna_blacklist": sorted(self.dynamic_like_blacklist),
-        }
+        payload = {"known_dynamic_ids": sorted(self.known_dynamic_ids)}
         with open(self.state_file, "w", encoding="utf-8") as file:
             json.dump(payload, file)
 
@@ -346,17 +319,12 @@ class BilibiliNotifierService:
         self,
         dynamic_item: Dict[str, Any],
         parsed_dynamic: ParsedDynamic,
-        next_blacklist: Set[int],
     ) -> None:
         if not self._should_auto_like(parsed_dynamic):
             return
 
         dynamic_id = _as_int(dynamic_item.get("id_str"), default=0)
         if dynamic_id <= 0:
-            return
-
-        if dynamic_id in self.dynamic_like_blacklist:
-            next_blacklist.add(dynamic_id)
             return
 
         modules = dynamic_item.get("modules", {})
@@ -371,15 +339,21 @@ class BilibiliNotifierService:
             response = await Dynamic(dynamic_id, credential=self.credential).set_like(True)
         except Exception as error:
             logger.warning(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞失败：{error}")
-            next_blacklist.add(dynamic_id)
             return
-
-        if isinstance(response, dict) and response.get("code", 1) == 0:
-            logger.info(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞了")
-            return
-
-        logger.warning(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞失败")
-        next_blacklist.add(dynamic_id)
+        """
+        Due to the API setting, this is always success (response is an empty dict)
+        the new API /x/dynamic/feed/dyn/thumb?csrf=xxxx will return the detailed results like:
+        {
+            "code": 0,
+            "message": "OK",
+            "ttl": 1,
+            "data": {}
+        }
+        but it seems like the bilibili-api package doesn't use it.
+        The current API could not like the dynamic that requires payment (充电解锁)
+        """
+        # if isinstance(response, dict) and response.get("code", 1) == 0:
+        logger.info(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞成功")
 
     def _build_dynamic_message_segments(self, dynamic: ParsedDynamic) -> List[MessageSegment]:
         return [MessageSegment.text(dynamic.action + '：\n')] + list(dynamic.message)
@@ -439,6 +413,7 @@ class BilibiliNotifierService:
 
     async def _send_update_notification(self, dynamic: ParsedDynamic) -> None:
         send_private, send_group = self._build_dynamic_senders(dynamic)
+        failures: List[str] = []
 
         for user_id in self._iter_debug_user_ids():
             logger.info(f"将 {dynamic.name} 的更新消息推送到用户 {user_id}")
@@ -446,6 +421,7 @@ class BilibiliNotifierService:
                 await send_private(user_id)
             except Exception as error:
                 logger.warning(f"给用户 {user_id} 推送 {dynamic.name} 更新失败：{error}")
+                failures.append(f"用户 {user_id}: {error}")
 
         for group_id in self._get_target_groups(self.update_targets, dynamic.mid, dynamic.name):
             if self._is_type_blocked(group_id, dynamic.dynamic_type):
@@ -460,6 +436,35 @@ class BilibiliNotifierService:
                 await send_group(qq_group_id)
             except Exception as error:
                 logger.warning(f"给群 {qq_group_id} 推送 {dynamic.name} 更新失败：{error}")
+                failures.append(f"群 {qq_group_id}: {error}")
+
+        if failures:
+            await self._notify_debug_users_of_failure(dynamic, failures)
+
+    async def _notify_debug_users_of_failure(
+        self, dynamic: ParsedDynamic, failures: List[str]
+    ) -> None:
+        dynamic_url = clean_url(dynamic.url)
+        failure_summary = "\n".join(failures)
+        text = f"推送失败通知：{dynamic.name}\n链接：{dynamic_url}\n失败详情：\n{failure_summary}"
+
+        if self.config.bnotifier_use_saa:
+            from nonebot_plugin_saa import MessageFactory, Text, TargetQQPrivate
+
+            async def send_error(user_id: int) -> None:
+                await MessageFactory([Text(text)]).send_to(TargetQQPrivate(user_id=user_id))
+        else:
+            bot = get_bot()
+            msg = Message([MessageSegment.text(text)])
+
+            async def send_error(user_id: int) -> None:
+                await bot.send_private_msg(user_id=user_id, message=msg)
+
+        for user_id in self._iter_debug_user_ids():
+            try:
+                await send_error(user_id)
+            except Exception as error:
+                logger.warning(f"发送失败通知到用户 {user_id} 也失败了：{error}")
 
     async def fetch_bilibili_updates(self) -> None:
         if not self.update_targets and not self.like_targets:
@@ -474,8 +479,16 @@ class BilibiliNotifierService:
         if not dynamic_items:
             return
 
-        dynamic_timestamps: List[int] = []
-        next_like_blacklist: Set[int] = set()
+        current_ids: Set[str] = set()
+        for item in dynamic_items:
+            did = _as_str(item.get("id_str")).strip()
+            if did:
+                current_ids.add(did)
+
+        is_first_run = (
+            len(self.known_dynamic_ids) == 0
+            and self.config.bnotifier_ignore_old_dynamic_on_start
+        )
 
         for dynamic_item in dynamic_items:
             try:
@@ -483,14 +496,21 @@ class BilibiliNotifierService:
                 if parsed_dynamic is None:
                     continue
 
-                await self._try_auto_like(dynamic_item, parsed_dynamic, next_like_blacklist)
+                await self._try_auto_like(dynamic_item, parsed_dynamic)
 
-                if parsed_dynamic.timestamp > 0:
-                    dynamic_timestamps.append(parsed_dynamic.timestamp)
+                dynamic_id = parsed_dynamic.id_str
+                if not dynamic_id:
+                    continue
+
+                if dynamic_id in self.known_dynamic_ids:
+                    continue
+
+                self.known_dynamic_ids.add(dynamic_id)
+
+                if is_first_run:
+                    continue
 
                 if parsed_dynamic.mid not in self.update_targets and parsed_dynamic.name not in self.update_targets:
-                    continue
-                if parsed_dynamic.timestamp <= self.last_update_timestamp:
                     continue
                 if self._is_type_blocked(parsed_dynamic.mid, parsed_dynamic.dynamic_type) or self._is_type_blocked(parsed_dynamic.name, parsed_dynamic.dynamic_type):
                     continue
@@ -502,14 +522,12 @@ class BilibiliNotifierService:
             except Exception as error:
                 logger.warning(f"获取推送动态失败：{error}")
 
-        self.dynamic_like_blacklist = next_like_blacklist
+        stale_ids = self.known_dynamic_ids - current_ids
+        if stale_ids:
+            self.known_dynamic_ids -= stale_ids
+            logger.debug(f"清理 {len(stale_ids)} 条过期动态ID")
 
-        if dynamic_timestamps:
-            latest_timestamp = max(dynamic_timestamps)
-            if latest_timestamp > self.last_update_timestamp:
-                self.last_update_timestamp = latest_timestamp
-                self._save_state()
-                logger.debug(f"刷新动态更新时间为 {latest_timestamp}")
+        self._save_state()
 
     def _extract_room_id(self, room_url: str) -> Optional[int]:
         matched = ROOM_URL_PATTERN.match(room_url)
@@ -671,19 +689,3 @@ class BilibiliNotifierService:
         logger.info(f"按ID推送动态成功（{dynamic_id} -> {qq_user_id}）")
         return True, "ok"
 
-    def reset_last_update_timestamp(self, timestamp: Optional[int] = None) -> Tuple[int, int]:
-        old_timestamp = self.last_update_timestamp
-
-        if timestamp is None:
-            new_timestamp = int(time.time())
-        else:
-            new_timestamp = max(0, int(timestamp))
-
-        self.last_update_timestamp = new_timestamp
-        self.dynamic_like_blacklist.clear()
-        self._save_state()
-
-        logger.info(
-            f"重置 last_update_timestamp：{old_timestamp} -> {self.last_update_timestamp}"
-        )
-        return old_timestamp, self.last_update_timestamp

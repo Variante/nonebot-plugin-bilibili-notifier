@@ -114,20 +114,19 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `bnotifier_ignore_old_dynamic_on_start` | `true` | 无状态缓存时是否忽略历史动态 |
-| `bnotifier_persist_state` | `true` | 是否持久化最后动态时间与点赞黑名单 |
-| `bnotifier_state_file` | `"last_update.json"` | 状态文件名（缓存目录下） |
+| `bnotifier_ignore_old_dynamic_on_start` | `true` | 首次运行（无已知动态记录）时是否忽略历史动态 |
+| `bnotifier_state_file` | `"last_update.json"` | 状态文件名（缓存目录下），用于持久化已知动态ID集合 |
 
 ## 🛠️ 调试命令
 
-- 命令：`/dd <动态ID>`
-- 示例：`/dd 1175425797536612360`
-- 权限：发送者必须在 `bnotifier_debug_user` 列表中
+- 命令：`/bnotifier_parse <动态ID>`
+- 示例：`/bnotifier_parse 1175425797536612360`
+- 权限：发送者必须在 `bnotifier_debug_user` 列表或 NoneBot `SUPERUSERS` 中
 - 行为：按动态ID拉取并解析动态，然后将消息推送给发送者
-- 命令：`/dr` 或 `/dr <unix时间戳>`
-- 示例：`/dr`、`/dr 1732012345`
-- 权限：发送者必须在 `bnotifier_debug_user` 列表中
-- 行为：重置 `last_update_timestamp`（不带参数时重置为当前时间）
+
+## 📢 推送失败通知
+
+当向群或调试用户推送动态失败时，插件会自动向 `bnotifier_debug_user` 中的用户发送失败通知，包含动态链接和失败详情。
 
 ## 🍪 cookies 文件格式
 
