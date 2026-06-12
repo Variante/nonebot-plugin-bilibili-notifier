@@ -1,8 +1,9 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from nonebot.adapters.onebot.v11 import MessageSegment
 
 from .models import ParsedDynamic
+from .utils import _as_int, _as_str
 
 
 def Text(text: str) -> MessageSegment:
@@ -25,19 +26,6 @@ SKIPPED_DYNAMIC_TYPES = {
 }
 
 
-def _as_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value)
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _normalize_url(raw_url: str) -> str:
     if not raw_url:
         return ""
@@ -48,11 +36,11 @@ def _normalize_url(raw_url: str) -> str:
     return f"https://{raw_url.lstrip('/')}"
 
 
-def parse_rich_text(rich_text_nodes: Any) -> List[Any]:
+def parse_rich_text(rich_text_nodes: Any) -> list[Any]:
     if not isinstance(rich_text_nodes, list):
         return []
 
-    segments: List[Any] = []
+    segments: list[Any] = []
     for node in rich_text_nodes:
         if not isinstance(node, dict):
             continue
@@ -81,7 +69,7 @@ def parse_rich_text(rich_text_nodes: Any) -> List[Any]:
     return segments
 
 
-def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
+def parse_dynamic(dynamic_data: dict[str, Any]) -> ParsedDynamic | None:
     if not isinstance(dynamic_data, dict):
         return None
 
@@ -106,9 +94,9 @@ def parse_dynamic(dynamic_data: Dict[str, Any]) -> Optional[ParsedDynamic]:
 
     text = ""
     action = ""
-    message: List[Any] = []
+    message: list[Any] = []
     raw_url = ""
-    origin: Optional[ParsedDynamic] = None
+    origin: ParsedDynamic | None = None
 
     module_dynamic = modules.get("module_dynamic", {})
     if not isinstance(module_dynamic, dict):

@@ -98,16 +98,27 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 | --- | --- | --- |
 | `bnotifier_use_saa` | `true` | 是否使用 SAA 发送消息。`true` 时依赖 `nonebot-plugin-saa` 并支持多平台；`false` 时直接调用 OneBot v11 API，无需 SAA |
 
+### 开播通知
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `bnotifier_live_include_title` | `true` | 开播通知是否附带直播标题 |
+| `bnotifier_live_include_cover` | `true` | 开播通知是否附带封面图片 |
+| `bnotifier_live_start_silence_seconds` | `300` | 开播推送静默期（秒）：UP 在该时间内反复开播只推送一次，防止刷屏 |
+| `bnotifier_live_push_stop` | `false` | 是否在直播结束时推送下播通知（附带本场时长） |
+| `bnotifier_live_stop_grace_seconds` | `90` | 下播推送延迟（秒）：等待该时间后仍未恢复直播才发送下播通知 |
+| `bnotifier_live_websocket_enabled` | `true` | 是否通过 WebSocket 实时监听开播事件（比轮询接口延迟低，无需关注主播） |
+
 ### 拉取与性能
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `bnotifier_dynamic_update_interval` | `120` | 动态轮询间隔（秒） |
-| `bnotifier_live_update_interval` | `60` | 开播轮询间隔（秒） |
+| `bnotifier_live_update_interval` | `60` | 直播 WebSocket 断线重试间隔（秒） |
+| `bnotifier_live_reconcile_interval` | `60` | 直播状态复核间隔（秒） |
 | `bnotifier_dynamic_pages` | `1` | 每轮动态抓取页数 |
 | `bnotifier_dynamic_features` | `"itemOpusStyle"` | 动态接口 features 参数 |
 | `bnotifier_timezone_offset` | `-480` | 动态接口 timezone_offset 参数 |
-| `bnotifier_live_fetch_size` | `50` | 每轮直播列表抓取数量 |
 | `bnotifier_api_timeout` | `20` | API 超时时间（秒） |
 
 ### 状态与启动行为
@@ -121,6 +132,7 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 
 - 命令：`/bnotifier_parse <动态ID>`
 - 示例：`/bnotifier_parse 859921215107629064`
+- 命令：`/bnotifier_status`
 - 权限：发送者必须在 `bnotifier_debug_user` 列表或 NoneBot `SUPERUSERS` 中
 - 行为：按动态ID拉取并解析动态，然后将消息推送给发送者
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any
 
 from nonebot.adapters.onebot.v11 import MessageSegment
 
@@ -11,8 +13,8 @@ class ParsedDynamic:
     dynamic_type: str
     timestamp: int
     text: str
-    message: List[MessageSegment]
+    message: list[MessageSegment]
     url: str
     id_str: str = ""
     action: str = ""
-    origin: Optional["ParsedDynamic"] = None
+    origin: ParsedDynamic | None = None

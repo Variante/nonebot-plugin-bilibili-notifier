@@ -177,3 +177,4 @@ pyrightconfig.json
 
 *.sh
 CLAUDE.md
+\.*

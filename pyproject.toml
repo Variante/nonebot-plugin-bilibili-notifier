@@ -1,13 +1,13 @@
 [project]
 name = "nonebot-plugin-bilibili-notifier"
-version = "0.4.0"
+version = "0.5.0"
 description = "NoneBot2 plugin for pushing update and live notifications from Bibibili."
 authors = [
     {name = "Variante", email = "382086919@qq.com"},
 ]
 license = {text = "MIT"}
-dependencies = ["nonebot2>=2.0.0rc2", "nonebot-adapter-onebot>=2.1.5", "nonebot-plugin-apscheduler>=0.2.0", "bilibili-api-python>=16.2.0", "nonebot_plugin_localstore", "nonebot-plugin-send-anything-anywhere"]
-requires-python = ">=3.8"
+dependencies = ["nonebot2>=2.0.0rc2", "nonebot-adapter-onebot>=2.1.5", "nonebot-plugin-apscheduler>=0.2.0", "bilibili-api-python>=16.2.0", "nonebot_plugin_localstore", "nonebot-plugin-send-anything-anywhere", "aiohttp>=3.9.0", "Brotli>=1.1.0"]
+requires-python = ">=3.10"
 readme = "README.md"
 
 [project.urls]
