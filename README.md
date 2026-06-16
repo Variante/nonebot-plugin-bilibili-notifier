@@ -125,8 +125,8 @@ plugins = ["nonebot_plugin_bilibili_notifier"]
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `bnotifier_ignore_old_dynamic_on_start` | `true` | 首次运行（无已知动态记录）时是否忽略历史动态 |
-| `bnotifier_state_file` | `"last_update.json"` | 状态文件名（缓存目录下），用于持久化已知动态ID集合 |
+| `bnotifier_ignore_old_dynamic_on_start` | `true` | 首次运行（无动态时间记录）时是否忽略历史动态 |
+| `bnotifier_state_file` | `"last_update.json"` | 状态文件名（缓存目录下），用于持久化动态时间记录和直播会话状态 |
 
 ## 🛠️ 调试命令
 

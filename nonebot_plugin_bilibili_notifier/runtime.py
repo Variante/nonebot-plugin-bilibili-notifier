@@ -4,6 +4,7 @@ import re
 import struct
 import time
 import zlib
+from collections import deque
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ BILIBILI_DYNAMIC_API = get_api("dynamic")
 BILIBILI_USER_API = get_api("user")
 ROOM_URL_PATTERN = re.compile(r"https?://live.bilibili.com/(\d+)")
 COOKIE_KEYS = ("sessdata", "bili_jct", "buvid3", "dedeuserid")
-MAX_LIKED_DYNAMIC_IDS = 5000
+MAX_AUTO_LIKE_ATTEMPT_CACHE_SIZE = 5000
 IntMessageSender = Callable[[int], Awaitable[None]]
 
 LIVE_WS_HEADERS = {
@@ -559,8 +560,11 @@ class BilibiliNotifierService:
         state_filename = config.bnotifier_state_file.strip() or "last_update.json"
         self.state_file = get_cache_file("bilibili-notifier", state_filename)
 
-        self.known_dynamic_ids: set[str] = set()
-        self.liked_dynamic_ids: set[str] = set()
+        self.last_seen_dynamic_timestamp = 0
+        self.last_auto_like_dynamic_timestamp = 0
+        self.last_dynamic_check_timestamp = 0
+        self._auto_like_attempted_keys: set[str] = set()
+        self._auto_like_attempt_order: deque[str] = deque()
         self.live_sessions: dict[str, LiveSessionState] = {}
         self.notified_live_users: set[str] = set()
         self.current_live_users: set[str] = set()
@@ -582,29 +586,20 @@ class BilibiliNotifierService:
             with open(self.state_file, "r", encoding="utf-8") as file:
                 state_data = json.load(file)
 
-            ids = state_data.get("known_dynamic_ids")
-            if ids is None:
-                logger.info("检测到旧格式状态文件，将在首次拉取时重新初始化")
-            else:
-                self.known_dynamic_ids = self._normalize_dynamic_id_set(ids)
-
-            liked_ids = state_data.get("liked_dynamic_ids")
-            if liked_ids is not None:
-                self.liked_dynamic_ids = self._normalize_dynamic_id_set(liked_ids)
-                self._trim_liked_dynamic_ids()
-            elif self.known_dynamic_ids:
-                self.liked_dynamic_ids = set(self.known_dynamic_ids)
-                self._trim_liked_dynamic_ids()
-                logger.info(
-                    "状态文件缺少已点赞动态ID，已将现有已知动态标记为已处理，避免重复点赞"
-                )
+            self.last_seen_dynamic_timestamp = self._parse_state_timestamp(
+                state_data.get("last_seen_dynamic_timestamp")
+            )
+            self.last_auto_like_dynamic_timestamp = self._parse_state_timestamp(
+                state_data.get("last_auto_like_dynamic_timestamp")
+            )
+            self.last_dynamic_check_timestamp = self._parse_state_timestamp(
+                state_data.get("last_dynamic_check_timestamp")
+            )
 
             self.live_sessions = self._load_live_sessions(state_data.get("live_sessions"))
 
             logger.info(
-                f"加载已知动态ID：{len(self.known_dynamic_ids)} 条，"
-                f"已点赞动态ID：{len(self.liked_dynamic_ids)} 条，"
-                f"直播会话：{len(self.live_sessions)} 条"
+                f"上次检查动态：{self._format_beijing_timestamp(self.last_dynamic_check_timestamp)}"
             )
         except FileNotFoundError:
             logger.warning("未找到状态缓存文件，将在首次拉取时初始化")
@@ -612,10 +607,10 @@ class BilibiliNotifierService:
             logger.warning(f"读取状态缓存失败：{error}")
 
     def _save_state(self) -> None:
-        self._trim_liked_dynamic_ids()
         payload = {
-            "known_dynamic_ids": sorted(self.known_dynamic_ids),
-            "liked_dynamic_ids": sorted(self.liked_dynamic_ids),
+            "last_seen_dynamic_timestamp": self.last_seen_dynamic_timestamp,
+            "last_auto_like_dynamic_timestamp": self.last_auto_like_dynamic_timestamp,
+            "last_dynamic_check_timestamp": self.last_dynamic_check_timestamp,
             "live_sessions": self._dump_live_sessions(),
         }
         with open(self.state_file, "w", encoding="utf-8") as file:
@@ -668,26 +663,35 @@ class BilibiliNotifierService:
             }
         return live_sessions
 
-    def _normalize_dynamic_id_set(self, ids: Any) -> set[str]:
-        if not isinstance(ids, Sequence) or isinstance(ids, (str, bytes, bytearray)):
-            return set()
-        normalized_ids: set[str] = set()
-        for dynamic_id in ids:
-            normalized_id = _as_str(dynamic_id).strip()
-            if normalized_id:
-                normalized_ids.add(normalized_id)
-        return normalized_ids
+    def _parse_state_timestamp(self, value: Any) -> int:
+        return max(0, _as_int(value, default=0))
 
-    def _trim_liked_dynamic_ids(self) -> None:
-        if len(self.liked_dynamic_ids) <= MAX_LIKED_DYNAMIC_IDS:
+    def _format_beijing_timestamp(self, timestamp: int) -> str:
+        if timestamp <= 0:
+            return "无记录"
+        formatted_time = time.strftime(
+            "%Y-%m-%d %H:%M:%S",
+            time.gmtime(timestamp + 8 * 60 * 60),
+        )
+        return f"{formatted_time} 北京时间"
+
+    def _get_dynamic_timestamp(self, dynamic: ParsedDynamic) -> int:
+        return max(0, _as_int(dynamic.timestamp, default=0))
+
+    def _get_auto_like_attempt_key(self, dynamic: ParsedDynamic, timestamp: int) -> str:
+        target = dynamic.mid or dynamic.name
+        return f"{target}:{timestamp}"
+
+    def _remember_auto_like_attempt(self, attempt_key: str) -> None:
+        if attempt_key in self._auto_like_attempted_keys:
             return
 
-        def sort_key(dynamic_id: str) -> tuple[int, str]:
-            return (_as_int(dynamic_id, default=0), dynamic_id)
+        self._auto_like_attempted_keys.add(attempt_key)
+        self._auto_like_attempt_order.append(attempt_key)
 
-        self.liked_dynamic_ids = set(
-            sorted(self.liked_dynamic_ids, key=sort_key)[-MAX_LIKED_DYNAMIC_IDS:]
-        )
+        while len(self._auto_like_attempt_order) > MAX_AUTO_LIKE_ATTEMPT_CACHE_SIZE:
+            expired_attempt_key = self._auto_like_attempt_order.popleft()
+            self._auto_like_attempted_keys.discard(expired_attempt_key)
 
     def _is_type_blocked(self, target: str, dynamic_type: str) -> bool:
         if dynamic_type in self.type_blacklist.get(target, set()):
@@ -1538,17 +1542,22 @@ class BilibiliNotifierService:
         self,
         dynamic_item: dict[str, Any],
         parsed_dynamic: ParsedDynamic,
-    ) -> None:
+        previous_auto_like_timestamp: int,
+    ) -> int | None:
         if not self._should_auto_like(parsed_dynamic):
-            return
+            return None
+
+        dynamic_timestamp = self._get_dynamic_timestamp(parsed_dynamic)
+        if dynamic_timestamp <= 0 or dynamic_timestamp <= previous_auto_like_timestamp:
+            return None
 
         dynamic_id = _as_int(dynamic_item.get("id_str"), default=0)
         if dynamic_id <= 0:
-            return
-        dynamic_id_str = str(dynamic_id)
+            return None
 
-        if dynamic_id_str in self.liked_dynamic_ids:
-            return
+        attempt_key = self._get_auto_like_attempt_key(parsed_dynamic, dynamic_timestamp)
+        if attempt_key in self._auto_like_attempted_keys:
+            return dynamic_timestamp
 
         modules = dynamic_item.get("modules", {})
         module_stat = modules.get("module_stat", {}) if isinstance(modules, dict) else {}
@@ -1556,17 +1565,19 @@ class BilibiliNotifierService:
         has_liked = bool(like_info.get("status")) if isinstance(like_info, dict) else False
 
         if has_liked:
-            self.liked_dynamic_ids.add(dynamic_id_str)
-            return
+            self._remember_auto_like_attempt(attempt_key)
+            return dynamic_timestamp
 
+        # Some dynamics do not reflect like status changes; avoid retrying them every poll.
+        self._remember_auto_like_attempt(attempt_key)
         try:
             await Dynamic(dynamic_id, credential=self.credential).set_like(True)
         except Exception as error:
-            logger.warning(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞失败：{error}")
-            return
+            logger.warning(f"给 {parsed_dynamic.name} 的动态点赞失败：{error}")
+            return dynamic_timestamp
         # bilibili-api returns an empty payload here, so failures are detected by exception.
-        self.liked_dynamic_ids.add(dynamic_id_str)
-        logger.info(f"给 {parsed_dynamic.name} 的 {dynamic_id} 点赞成功")
+        logger.info(f"给 {parsed_dynamic.name} 的动态点赞成功")
+        return dynamic_timestamp
 
     def _build_dynamic_message_segments(self, dynamic: ParsedDynamic) -> list[MessageSegment]:
         return [MessageSegment.text(dynamic.action + '：\n')] + list(dynamic.message)
@@ -1678,17 +1689,18 @@ class BilibiliNotifierService:
             logger.warning(f"获取动态列表失败：{error}")
             return
 
+        self.last_dynamic_check_timestamp = int(time.time())
+
         if not dynamic_items:
+            self._save_state()
             return
 
-        current_ids: set[str] = set()
-        for item in dynamic_items:
-            did = _as_str(item.get("id_str")).strip()
-            if did:
-                current_ids.add(did)
-
+        previous_last_seen_timestamp = self.last_seen_dynamic_timestamp
+        max_seen_timestamp = previous_last_seen_timestamp
+        previous_last_auto_like_timestamp = self.last_auto_like_dynamic_timestamp
+        max_auto_like_timestamp = previous_last_auto_like_timestamp
         is_first_run = (
-            len(self.known_dynamic_ids) == 0
+            previous_last_seen_timestamp <= 0
             and self.config.bnotifier_ignore_old_dynamic_on_start
         )
 
@@ -1698,16 +1710,26 @@ class BilibiliNotifierService:
                 if parsed_dynamic is None:
                     continue
 
-                await self._try_auto_like(dynamic_item, parsed_dynamic)
+                if not is_first_run:
+                    auto_like_timestamp = await self._try_auto_like(
+                        dynamic_item,
+                        parsed_dynamic,
+                        previous_last_auto_like_timestamp,
+                    )
+                    if auto_like_timestamp is not None:
+                        max_auto_like_timestamp = max(
+                            max_auto_like_timestamp,
+                            auto_like_timestamp,
+                        )
 
-                dynamic_id = parsed_dynamic.id_str
-                if not dynamic_id:
+                dynamic_timestamp = self._get_dynamic_timestamp(parsed_dynamic)
+                if dynamic_timestamp <= 0:
                     continue
 
-                if dynamic_id in self.known_dynamic_ids:
-                    continue
+                max_seen_timestamp = max(max_seen_timestamp, dynamic_timestamp)
 
-                self.known_dynamic_ids.add(dynamic_id)
+                if dynamic_timestamp <= previous_last_seen_timestamp:
+                    continue
 
                 if is_first_run:
                     continue
@@ -1724,10 +1746,12 @@ class BilibiliNotifierService:
             except Exception as error:
                 logger.warning(f"获取推送动态失败：{error}")
 
-        stale_ids = self.known_dynamic_ids - current_ids
-        if stale_ids:
-            self.known_dynamic_ids -= stale_ids
-            logger.debug(f"清理 {len(stale_ids)} 条过期动态ID")
+        if max_seen_timestamp > self.last_seen_dynamic_timestamp:
+            self.last_seen_dynamic_timestamp = max_seen_timestamp
+        if is_first_run:
+            max_auto_like_timestamp = max(max_auto_like_timestamp, max_seen_timestamp)
+        if max_auto_like_timestamp > self.last_auto_like_dynamic_timestamp:
+            self.last_auto_like_dynamic_timestamp = max_auto_like_timestamp
 
         self._save_state()
 
